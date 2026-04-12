@@ -1,0 +1,392 @@
+# BigQuery parity tasks — dcx vs bq CLI.
+#
+# Placeholders like {project} are resolved from manifest.yaml at runtime.
+#
+# Validation can be specified per cli_variant (preferred for cross-CLI parity
+# tasks with different output shapes) or at the task level (used when both
+# CLIs share the same validation contract). Per-variant validation takes
+# precedence over task-level validation.
+
+tasks:
+  # ── Read tasks ───────────────────────────────────────────────────────
+
+  - id: bq-dataset-list
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: List all datasets in the project
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: dcx-minified
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --format json-minified
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: bq
+        command: >-
+          bq ls --format=json --project_id={project}
+        validation:
+          type: json_parse
+    metrics: &standard_metrics
+      - exit_code
+      - wall_clock_ms
+      - stdout_bytes
+      - stderr_bytes
+      - token_input_estimate
+      - token_output_estimate
+
+  - id: bq-dataset-get
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Get metadata for a specific dataset
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets get
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [datasetReference]
+      - name: dcx-minified
+        command: >-
+          dcx datasets get
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json-minified
+        validation:
+          type: json_keys
+          expected_keys: [datasetReference]
+      - name: bq
+        command: >-
+          bq show --format=json {project}:{bq_benchmark_dataset}
+        validation:
+          type: json_keys
+          expected_keys: [datasetReference]
+    metrics: *standard_metrics
+
+  - id: bq-table-list
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: List tables in a dataset
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx tables list
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: dcx-minified
+        command: >-
+          dcx tables list
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json-minified
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: bq
+        command: >-
+          bq ls --format=json {project}:{bq_benchmark_dataset}
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: bq-table-get
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Fetch schema for a known table
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx tables get
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --table-id {bq_table_narrow}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [schema]
+      - name: dcx-minified
+        command: >-
+          dcx tables get
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --table-id {bq_table_narrow}
+          --format json-minified
+        validation:
+          type: json_keys
+          expected_keys: [schema]
+      - name: bq
+        command: >-
+          bq show --schema --format=json {project}:{bq_benchmark_dataset}.{bq_table_narrow}
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  # ── Query tasks ──────────────────────────────────────────────────────
+
+  - id: bq-dryrun-aggregate
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Dry-run an aggregate query to validate SQL and estimate cost
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+          --dry-run
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [dry_run, method, url]
+      - name: dcx-minified
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+          --dry-run
+          --format json-minified
+        validation:
+          type: json_keys
+          expected_keys: [dry_run, method, url]
+      - name: bq
+        command: >-
+          bq query --dry_run --format=json --use_legacy_sql=false
+          "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: bq-query-aggregate
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Execute an aggregate query and return results
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+          --format json
+        validation:
+          type: semantic_sql_result
+          expected_columns: [word, total]
+          min_rows: 1
+      - name: dcx-minified
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+          --format json-minified
+        validation:
+          type: semantic_sql_result
+          expected_columns: [word, total]
+          min_rows: 1
+      - name: bq
+        command: >-
+          bq query --format=json --use_legacy_sql=false
+          "SELECT word, SUM(word_count) AS total FROM \`bigquery-public-data.samples.shakespeare\` GROUP BY word ORDER BY total DESC LIMIT 10"
+        validation:
+          type: semantic_sql_result
+          expected_columns: [word, total]
+          min_rows: 1
+    metrics: *standard_metrics
+
+  - id: bq-query-nested
+    track: parity
+    system: bigquery
+    dataset_tier: nested
+    goal: Query nested fields from a semi-structured table
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT author.name, COUNT(*) AS commits FROM \`bigquery-public-data.github_repos.commits\` GROUP BY author.name ORDER BY commits DESC LIMIT 10"
+          --format json
+        validation:
+          type: semantic_sql_result
+          expected_columns: [name, commits]
+          min_rows: 1
+      - name: dcx-minified
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELECT author.name, COUNT(*) AS commits FROM \`bigquery-public-data.github_repos.commits\` GROUP BY author.name ORDER BY commits DESC LIMIT 10"
+          --format json-minified
+        validation:
+          type: semantic_sql_result
+          expected_columns: [name, commits]
+          min_rows: 1
+      - name: bq
+        command: >-
+          bq query --format=json --use_legacy_sql=false
+          "SELECT author.name, COUNT(*) AS commits FROM \`bigquery-public-data.github_repos.commits\` GROUP BY author.name ORDER BY commits DESC LIMIT 10"
+        validation:
+          type: semantic_sql_result
+          expected_columns: [name, commits]
+          min_rows: 1
+    metrics: *standard_metrics
+
+  # ── Error-injection tasks ────────────────────────────────────────────
+
+  - id: bq-error-malformed-sql
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Handle a malformed SQL query gracefully
+    error_class: bad_sql
+    expected_recovery_action: fix_input
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELEKT * FORM shakespeare"
+          --format json
+      - name: dcx-minified
+        command: >-
+          dcx jobs query
+          --project-id {project}
+          --query "SELEKT * FORM shakespeare"
+          --format json-minified
+      - name: bq
+        command: >-
+          bq query --format=json --use_legacy_sql=false
+          "SELEKT * FORM shakespeare"
+    metrics: *standard_metrics
+
+  - id: bq-error-not-found
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Handle a request for a nonexistent dataset
+    error_class: not_found
+    expected_recovery_action: fix_input
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets get
+          --project-id {project}
+          --dataset-id {bq_nonexistent_dataset}
+          --format json
+      - name: dcx-minified
+        command: >-
+          dcx datasets get
+          --project-id {project}
+          --dataset-id {bq_nonexistent_dataset}
+          --format json-minified
+      - name: bq
+        command: >-
+          bq show --format=json {project}:{bq_nonexistent_dataset}
+    metrics: *standard_metrics
+
+  - id: bq-error-auth-failure
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Handle an authentication failure
+    error_class: auth
+    expected_recovery_action: reauth
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --token invalid-token-value
+          --format json
+      - name: dcx-minified
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --token invalid-token-value
+          --format json-minified
+      - name: bq
+        command: >-
+          bq ls --format=json --project_id={project}
+          --credential_file=/dev/null
+    metrics: *standard_metrics
+
+  - id: bq-error-invalid-flag
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Handle an invalid flag gracefully
+    error_class: invalid_flag
+    expected_recovery_action: fix_input
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --nonexistent-flag value
+          --format json
+      - name: dcx-minified
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --nonexistent-flag value
+          --format json-minified
+      - name: bq
+        command: >-
+          bq ls --format=json --nonexistent_flag=value
+    metrics: *standard_metrics
+
+  - id: bq-error-permission-denied
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Handle a permission denied error
+    error_class: permission_denied
+    expected_recovery_action: stop
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets list
+          --project-id bigquery-public-data
+          --format json
+      - name: dcx-minified
+        command: >-
+          dcx datasets list
+          --project-id bigquery-public-data
+          --format json-minified
+      - name: bq
+        command: >-
+          bq ls --format=json --project_id=bigquery-public-data
+    metrics: *standard_metrics

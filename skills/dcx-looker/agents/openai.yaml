@@ -1,0 +1,7 @@
+interface:
+  display_name: "dcx Looker"
+  short_description: "Looker explore and dashboard inspection via profile"
+  default_prompt: "Use $dcx-looker for Looker explore/dashboard listing and content inspection. For admin commands, use dcx-looker-admin-api."
+
+policy:
+  allow_implicit_invocation: true

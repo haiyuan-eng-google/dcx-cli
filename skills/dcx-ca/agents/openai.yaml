@@ -1,0 +1,7 @@
+interface:
+  display_name: "dcx Conversational Analytics"
+  short_description: "Natural language queries over BigQuery, Looker, AlloyDB, Spanner, and Cloud SQL"
+  default_prompt: "Use $dcx-ca for natural language queries, data agent management, and verified queries across all Data Cloud sources."
+
+policy:
+  allow_implicit_invocation: true

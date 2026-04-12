@@ -1,0 +1,7 @@
+interface:
+  display_name: "dcx BigQuery"
+  short_description: "Authentication, SQL queries, schema inspection, and BigQuery setup"
+  default_prompt: "Use $dcx-bigquery for dcx authentication, global flags, SQL queries, schema inspection, and BigQuery configuration."
+
+policy:
+  allow_implicit_invocation: true

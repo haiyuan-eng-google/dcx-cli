@@ -1,0 +1,150 @@
+# dcx differentiated tasks — features with no bq/gcloud equivalent.
+#
+# These tasks are dcx-only. They measure contract discoverability,
+# dry-run fidelity, auth preflight, profile validation, and MCP bridge.
+
+tasks:
+  # ── Contract discovery ───────────────────────────────────────────────
+
+  - id: dcx-meta-commands
+    track: differentiated
+    system: dcx
+    goal: Discover all available commands via machine-readable contract
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx meta commands --format json
+    validation:
+      type: json_keys
+      expected_keys: [contract_version, total, commands]
+    metrics: &standard_metrics
+      - exit_code
+      - wall_clock_ms
+      - stdout_bytes
+      - stderr_bytes
+      - token_input_estimate
+      - token_output_estimate
+
+  - id: dcx-meta-describe
+    track: differentiated
+    system: dcx
+    goal: Inspect the full contract for a specific command
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx meta describe analytics evaluate --format json
+    validation:
+      type: json_keys
+      expected_keys: [contract_version, command, flags, exit_codes]
+    metrics: *standard_metrics
+
+  # ── Dry-run ──────────────────────────────────────────────────────────
+
+  - id: dcx-dryrun-structured
+    track: differentiated
+    system: dcx
+    goal: Structured dry-run showing full request details without execution
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets list
+          --project-id {project}
+          --dry-run
+          --format json
+    validation:
+      type: json_keys
+      expected_keys: [dry_run, method, url]
+    metrics: *standard_metrics
+
+  # ── Auth preflight ───────────────────────────────────────────────────
+
+  - id: dcx-auth-check
+    track: differentiated
+    system: dcx
+    goal: Validate current authentication state without making API calls
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx auth check --format json
+    validation:
+      type: json_keys
+      expected_keys: [valid, source]
+    metrics: *standard_metrics
+
+  # ── Profile validation ──────────────────────────────────────────────
+
+  - id: dcx-profiles-test
+    track: differentiated
+    system: dcx
+    goal: Validate a profile against its configured source
+    note: >-
+      Requires a profile named {benchmark_profile} to exist in the local
+      dcx profiles config. The seed step documents how to create one.
+      If no profile is configured, this task will fail with exit 1,
+      which is a valid benchmark data point (setup cost).
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx profiles test --profile {benchmark_profile} --format json
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: false
+    metrics: *standard_metrics
+
+  # ── MCP bridge ──────────────────────────────────────────────────────
+
+  - id: dcx-mcp-tool-call
+    track: differentiated
+    system: dcx
+    goal: Execute a command through the MCP JSON-RPC bridge
+    note: >-
+      This task requires a helper script that starts dcx mcp serve,
+      sends a JSON-RPC tools/call request via stdin, and captures
+      the response from stdout.
+    cli_variants:
+      - name: dcx
+        command: >-
+          echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dcx_datasets_list","arguments":{"project_id":"{project}","dry_run":true}}}'
+          | dcx mcp serve
+    validation:
+      type: json_keys
+      expected_keys: [result]
+    metrics: *standard_metrics
+
+  # ── Paired skill evaluation ─────────────────────────────────────────
+
+  - id: dcx-discovery-vanilla
+    track: differentiated
+    system: dcx
+    goal: Discover how to list datasets using only --help
+    skill_mode: vanilla
+    note: >-
+      Agent task: given the goal "list all BigQuery datasets in project X",
+      use only dcx --help and subcommand help to find and execute the
+      correct command. Measure commands issued and success.
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx --help
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: false
+    metrics: *standard_metrics
+
+  - id: dcx-discovery-skill-augmented
+    track: differentiated
+    system: dcx
+    goal: Discover how to list datasets using SKILL.md and references
+    skill_mode: skill_augmented
+    note: >-
+      Same goal as dcx-discovery-vanilla, but the agent also has access
+      to the relevant SKILL.md and references/commands.md. Measure
+      commands issued and success. Report normalized gain vs vanilla.
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx --help
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: false
+    metrics: *standard_metrics

@@ -1,0 +1,281 @@
+# Spanner parity tasks — dcx vs gcloud spanner CLI.
+#
+# dcx does not currently have a Spanner query execution command.
+# SQL tasks are marked dcx_supported: false and run baseline-only.
+#
+# Validation can be per-variant or task-level. Per-variant takes precedence.
+
+tasks:
+  # ── Read tasks ───────────────────────────────────────────────────────
+
+  - id: sp-instance-list
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: List Spanner instances in the project
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner instances list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud spanner instances list
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: &standard_metrics
+      - exit_code
+      - wall_clock_ms
+      - stdout_bytes
+      - stderr_bytes
+      - token_input_estimate
+      - token_output_estimate
+
+  - id: sp-database-list
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: List databases in a Spanner instance
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases list
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud spanner databases list
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: sp-database-get
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Get metadata for a specific Spanner database
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases get
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --database-id {spanner_database}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [name, state]
+      - name: gcloud
+        command: >-
+          gcloud spanner databases describe {spanner_database}
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_keys
+          expected_keys: [name, state]
+    metrics: *standard_metrics
+
+  - id: sp-ddl-describe
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Fetch DDL for a Spanner database
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases get-ddl
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --database-id {spanner_database}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [statements]
+      - name: gcloud
+        command: >-
+          gcloud spanner databases ddl describe {spanner_database}
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  # ── SQL tasks (baseline-only, dcx N/A) ──────────────────────────────
+
+  - id: sp-query-simple
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Execute a simple SELECT query
+    dcx_supported: false
+    cli_variants:
+      - name: gcloud
+        command: >-
+          gcloud spanner databases execute-sql {spanner_database}
+          --instance={spanner_instance}
+          --project={project}
+          --sql="SELECT SingerId, FirstName, LastName FROM Singers LIMIT 10"
+          --format=json
+        validation:
+          type: semantic_sql_result
+          expected_columns: [SingerId, FirstName, LastName]
+          min_rows: 1
+    metrics: *standard_metrics
+
+  - id: sp-query-filtered
+    track: parity
+    system: spanner
+    dataset_tier: medium
+    goal: Execute a filtered SELECT with a WHERE clause
+    dcx_supported: false
+    cli_variants:
+      - name: gcloud
+        command: >-
+          gcloud spanner databases execute-sql {spanner_database}
+          --instance={spanner_instance}
+          --project={project}
+          --sql="SELECT SingerId, FirstName, LastName FROM Singers WHERE LastName LIKE 'S%' LIMIT 50"
+          --format=json
+        validation:
+          type: semantic_sql_result
+          expected_columns: [SingerId, FirstName, LastName]
+          min_rows: 0
+    metrics: *standard_metrics
+
+  # ── Error-injection tasks ────────────────────────────────────────────
+
+  - id: sp-error-bad-database
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Handle a request for a nonexistent database
+    error_class: not_found
+    expected_recovery_action: fix_input
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases get
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --database-id {spanner_nonexistent_database}
+          --format json
+      - name: gcloud
+        command: >-
+          gcloud spanner databases describe {spanner_nonexistent_database}
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+    metrics: *standard_metrics
+
+  - id: sp-error-bad-sql
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Handle malformed SQL
+    error_class: bad_sql
+    expected_recovery_action: fix_input
+    dcx_supported: false
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: gcloud
+        command: >-
+          gcloud spanner databases execute-sql {spanner_database}
+          --instance={spanner_instance}
+          --project={project}
+          --sql="SELEKT * FORM Singers"
+          --format=json
+    metrics: *standard_metrics
+
+  - id: sp-error-auth-failure
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Handle an authentication failure for Spanner
+    error_class: auth
+    expected_recovery_action: reauth
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner instances list
+          --project-id {project}
+          --token invalid-token-value
+          --format json
+      - name: gcloud
+        command: >-
+          gcloud spanner instances list
+          --project={project}
+          --impersonate-service-account=nonexistent@example.iam.gserviceaccount.com
+          --format=json
+    metrics: *standard_metrics
+
+  - id: sp-error-permission-denied
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Handle a permission denied error for Spanner
+    error_class: permission_denied
+    expected_recovery_action: stop
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases list
+          --project-id google-cloud-spanner-demo
+          --instance-id test-instance
+          --format json
+      - name: gcloud
+        command: >-
+          gcloud spanner databases list
+          --instance=test-instance
+          --project=google-cloud-spanner-demo
+          --format=json
+    metrics: *standard_metrics
+
+  - id: sp-error-not-found-instance
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: Handle a request for a nonexistent instance
+    error_class: not_found
+    expected_recovery_action: fix_input
+    validation:
+      type: exit_code_only
+      expected_exit_code_nonzero: true
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner instances get
+          --project-id {project}
+          --instance-id {spanner_nonexistent_instance}
+          --format json
+      - name: gcloud
+        command: >-
+          gcloud spanner instances describe {spanner_nonexistent_instance}
+          --project={project}
+          --format=json
+    metrics: *standard_metrics

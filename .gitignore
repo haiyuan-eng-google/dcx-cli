@@ -1,0 +1,32 @@
+# Binaries
+dcx
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Benchmark results (keep scorecards, ignore raw trial data)
+benchmarks/results/raw/*/
+
+# Build
+dist/

@@ -1,0 +1,7 @@
+interface:
+  display_name: "dcx Databases"
+  short_description: "AlloyDB, Spanner, and Cloud SQL inventory, schema, and database commands"
+  default_prompt: "Use $dcx-databases for direct AlloyDB, Spanner, and Cloud SQL listing, metadata, schema inspection, and database enumeration."
+
+policy:
+  allow_implicit_invocation: true
