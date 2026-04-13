@@ -19,8 +19,5 @@ jobs:
       - name: Build
         run: go build -o dcx ./cmd/dcx
 
-      - name: Unit tests
-        run: go test ./internal/auth/ ./internal/contracts/ ./internal/errors/ ./internal/output/ ./internal/profiles/ ./internal/ca/ ./internal/discovery/ -v
-
-      - name: Eval suite (CI gate)
-        run: go test ./internal/eval/ -v -count=1
+      - name: All tests
+        run: go test ./... -v -count=1

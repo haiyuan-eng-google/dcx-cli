@@ -43,15 +43,19 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// cleanEnv returns a minimal environment with no Google credentials.
+// Only PATH is inherited; all auth-related vars are excluded.
+func cleanEnv() []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=/tmp/dcx-eval-nonexistent",
+	}
+}
+
 func runDcx(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	cmd := exec.Command(dcxBinary, args...)
-	// Clear auth env vars to ensure predictable behavior.
-	cmd.Env = append(os.Environ(),
-		"DCX_TOKEN=",
-		"DCX_CREDENTIALS_FILE=",
-		"HOME=/tmp/dcx-eval-nonexistent",
-	)
+	cmd.Env = cleanEnv()
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -251,27 +255,15 @@ func TestExitCodeSemantics(t *testing.T) {
 		}
 	})
 
-	// Auth error → exit 3 (no credentials available)
+	// Auth error → exit 3 (no credentials available).
+	// cleanEnv() ensures no ambient ADC, so this must fail.
 	t.Run("auth_exit_3", func(t *testing.T) {
-		// auth check with no credentials should fail.
-		cmd := exec.Command(dcxBinary, "auth", "check")
-		cmd.Env = []string{
-			"HOME=/tmp/dcx-eval-no-creds",
-			"PATH=" + os.Getenv("PATH"),
+		_, stderr, exitCode := runDcx(t, "auth", "check")
+		if exitCode == 0 {
+			t.Fatal("auth check with no credentials should fail (exit 3), but exited 0 — environment may be leaking credentials")
 		}
-		var errBuf strings.Builder
-		cmd.Stderr = &errBuf
-		err := cmd.Run()
-		if err == nil {
-			// Might succeed if machine has gcloud ADC — skip.
-			t.Skip("auth check succeeded (machine has default credentials)")
-		}
-		exitErr, ok := err.(*exec.ExitError)
-		if !ok {
-			t.Fatalf("unexpected error type: %v", err)
-		}
-		if exitErr.ExitCode() != 3 {
-			t.Errorf("auth failure should exit 3, got %d; stderr: %s", exitErr.ExitCode(), errBuf.String())
+		if exitCode != 3 {
+			t.Errorf("auth failure should exit 3, got %d; stderr: %s", exitCode, stderr)
 		}
 	})
 }
@@ -372,40 +364,31 @@ func TestPreflightValidation(t *testing.T) {
 // ============================================================
 
 func TestAuthPreflight(t *testing.T) {
-	cmd := exec.Command(dcxBinary, "auth", "check", "--format", "json")
-	cmd.Env = []string{
-		"HOME=/tmp/dcx-eval-no-auth",
-		"PATH=" + os.Getenv("PATH"),
-	}
-	var outBuf, errBuf strings.Builder
-	cmd.Stdout = &outBuf
-	cmd.Stderr = &errBuf
-	err := cmd.Run()
+	// runDcx uses cleanEnv() — no ambient credentials.
+	_, stderr, exitCode := runDcx(t, "auth", "check", "--format", "json")
 
-	if err == nil {
-		t.Skip("auth check succeeded (machine has default credentials)")
-	}
-
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		t.Fatalf("unexpected error: %v", err)
+	if exitCode == 0 {
+		t.Fatal("auth check with no credentials should fail (exit 3), but exited 0 — environment may be leaking credentials")
 	}
 
 	// Should exit 3 (auth error).
-	if exitErr.ExitCode() != 3 {
-		t.Errorf("exit code = %d, want 3; stderr: %s", exitErr.ExitCode(), errBuf.String())
+	if exitCode != 3 {
+		t.Errorf("exit code = %d, want 3; stderr: %s", exitCode, stderr)
 	}
 
-	// Stderr should have error envelope.
-	stderr := strings.TrimSpace(errBuf.String())
-	if stderr != "" {
-		var envelope map[string]map[string]interface{}
-		if err := json.Unmarshal([]byte(stderr), &envelope); err == nil {
-			errObj := envelope["error"]
-			if code, ok := errObj["code"].(string); !ok || code != "AUTH_ERROR" {
-				t.Errorf("error code = %v, want AUTH_ERROR", errObj["code"])
-			}
-		}
+	// Stderr should have error envelope with AUTH_ERROR.
+	trimmed := strings.TrimSpace(stderr)
+	if trimmed == "" {
+		t.Fatal("expected error envelope on stderr, got empty")
+	}
+
+	var envelope map[string]map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+		t.Fatalf("stderr is not valid error envelope JSON: %v\nraw: %s", err, trimmed)
+	}
+	errObj := envelope["error"]
+	if code, ok := errObj["code"].(string); !ok || code != "AUTH_ERROR" {
+		t.Errorf("error code = %v, want AUTH_ERROR", errObj["code"])
 	}
 }
 
@@ -433,6 +416,19 @@ func TestSkillAlignment(t *testing.T) {
 		t.Fatalf("reading skills dir: %v", err)
 	}
 
+	// Known P1 (deferred) commands that skills may reference.
+	// These are logged but not failures.
+	p1Commands := map[string]bool{
+		"dcx auth login":              true,
+		"dcx auth logout":             true,
+		"dcx ca create-agent":         true,
+		"dcx ca list-agents":          true,
+		"dcx ca add-verified-query":   true,
+		"dcx looker explores get":     true,
+		"dcx looker dashboards list":  true,
+		"dcx generate-skills":         true,
+	}
+
 	// Regex to find dcx command references in skill docs.
 	cmdPattern := regexp.MustCompile(`dcx\s+(?:[\w-]+\s+)*[\w-]+`)
 
@@ -449,19 +445,14 @@ func TestSkillAlignment(t *testing.T) {
 		t.Run(entry.Name(), func(t *testing.T) {
 			matches := cmdPattern.FindAllString(string(data), -1)
 			for _, match := range matches {
-				// Normalize: trim trailing punctuation.
 				match = strings.TrimRight(match, ".,;:!?)")
-				// Skip partial matches that are just "dcx" alone.
 				if match == "dcx" {
 					continue
 				}
-				// Skip common non-command patterns.
-				if strings.HasPrefix(match, "dcx auth login") {
-					continue // auth login is P1
-				}
-				// Check if the referenced command exists.
+
 				if !registered[match] {
-					// Try with fewer words (skills might reference command groups).
+					// Try prefix match (skills may reference command groups
+					// or commands with trailing args).
 					parts := strings.Fields(match)
 					found := false
 					for i := len(parts); i >= 2; i-- {
@@ -471,8 +462,46 @@ func TestSkillAlignment(t *testing.T) {
 							break
 						}
 					}
+					// Also check if this is a valid command group prefix
+					// (e.g. "dcx looker explores" where "dcx looker explores list" exists).
 					if !found {
-						t.Logf("skill %s references unregistered command: %s", entry.Name(), match)
+						prefix := match + " "
+						for cmd := range registered {
+							if strings.HasPrefix(cmd, prefix) {
+								found = true
+								break
+							}
+						}
+					}
+					if found {
+						continue
+					}
+
+					// Check if this is a known P1 command.
+					isP1 := false
+					for p1Cmd := range p1Commands {
+						if strings.HasPrefix(match, p1Cmd) {
+							isP1 = true
+							break
+						}
+					}
+
+					// Also skip prose fragments that look like commands
+					// but contain non-command words.
+					looksLikeProse := false
+					for _, word := range []string{"usage", "authentication", "understand", "resolves", "credentials"} {
+						if strings.Contains(strings.ToLower(match), word) {
+							looksLikeProse = true
+							break
+						}
+					}
+
+					if isP1 {
+						t.Logf("P1 (deferred): skill %s references %s", entry.Name(), match)
+					} else if looksLikeProse {
+						// Skip prose that matched the regex.
+					} else {
+						t.Errorf("skill %s references unregistered P0 command: %s", entry.Name(), match)
 					}
 				}
 			}
