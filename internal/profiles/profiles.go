@@ -67,20 +67,37 @@ func (p *Profile) IsQueryDataSource() bool {
 }
 
 // LoadByName loads a profile by name from the profiles directory.
+// Resolution order:
+//  1. File basename match: name.yaml or name.yml in profiles dir
+//  2. YAML name: field match: scan all profiles for matching name field
+//  3. Direct file path: treat name as a file path
 func LoadByName(name string) (*Profile, error) {
 	dir := ProfilesDir()
-	// Try name.yaml, then name.yml.
+
+	// 1. Try file basename: name.yaml, name.yml.
 	for _, ext := range []string{".yaml", ".yml"} {
 		path := filepath.Join(dir, name+ext)
 		if _, err := os.Stat(path); err == nil {
 			return LoadFile(path)
 		}
 	}
-	// Try loading the name as a direct file path.
+
+	// 2. Search by YAML name: field across all profile files.
+	all, err := LoadAll()
+	if err == nil {
+		for _, p := range all {
+			if p.Name == name {
+				return &p, nil
+			}
+		}
+	}
+
+	// 3. Try loading the name as a direct file path.
 	if _, err := os.Stat(name); err == nil {
 		return LoadFile(name)
 	}
-	return nil, fmt.Errorf("profile not found: %s (searched %s)", name, dir)
+
+	return nil, fmt.Errorf("profile not found: %s (searched %s and YAML name: fields)", name, dir)
 }
 
 // ProfilesDir returns the default profiles directory path.
@@ -162,6 +179,9 @@ func (p *Profile) Validate() []string {
 	case Looker:
 		if p.LookerInstanceID == "" && p.InstanceID == "" {
 			issues = append(issues, "looker_instance_id or instance_id is required for looker")
+		}
+		if p.LookerInstanceURL == "" {
+			issues = append(issues, "looker_instance_url is required for looker")
 		}
 	}
 

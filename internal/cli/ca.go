@@ -27,6 +27,7 @@ func (a *App) addCACommands() {
 		"ca ask", "ca",
 		"Ask a natural-language question across Data Cloud sources",
 		[]contracts.FlagContract{
+			{Name: "question", Type: "string", Description: "Natural language question (positional argument)", Required: true},
 			{Name: "profile", Type: "string", Description: "Source profile name or path"},
 			{Name: "agent", Type: "string", Description: "Data agent name (BigQuery)"},
 			{Name: "tables", Type: "string", Description: "Comma-separated table refs (BigQuery)"},

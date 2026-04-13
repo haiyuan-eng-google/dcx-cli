@@ -28,7 +28,7 @@ type DatabasesListResult struct {
 // SchemaDescribe queries INFORMATION_SCHEMA via the CA QueryData API to
 // describe the schema of a database source.
 func SchemaDescribe(ctx context.Context, client *ca.Client, token string, profile *profiles.Profile) (*SchemaDescribeResult, error) {
-	question := schemaQuery(profile.SourceType)
+	question := schemaQueryForProfile(profile)
 
 	raw, err := client.AskQueryDataRaw(ctx, token, profile, question)
 	if err != nil {
@@ -46,7 +46,7 @@ func SchemaDescribe(ctx context.Context, client *ca.Client, token string, profil
 // DatabasesList queries available databases on an AlloyDB or Cloud SQL
 // instance via the CA QueryData API.
 func DatabasesList(ctx context.Context, client *ca.Client, token string, profile *profiles.Profile) (*DatabasesListResult, error) {
-	question := databasesListQuery(profile.SourceType)
+	question := databasesListQuery(profile.SourceType, profile.DBType)
 
 	raw, err := client.AskQueryDataRaw(ctx, token, profile, question)
 	if err != nil {
@@ -59,24 +59,33 @@ func DatabasesList(ctx context.Context, client *ca.Client, token string, profile
 	}, nil
 }
 
-// schemaQuery returns the INFORMATION_SCHEMA query for the given source type.
+// schemaQuery returns the INFORMATION_SCHEMA query for the given profile.
 func schemaQuery(st profiles.SourceType) string {
 	switch st {
 	case profiles.Spanner:
 		return "SELECT TABLE_NAME, COLUMN_NAME, SPANNER_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS ORDER BY TABLE_NAME, ORDINAL_POSITION"
-	case profiles.AlloyDB, profiles.CloudSQL:
+	case profiles.AlloyDB:
 		return "SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position"
 	default:
-		return "SELECT table_name, column_name, data_type FROM information_schema.columns ORDER BY table_name, ordinal_position"
+		return "SELECT table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog', 'mysql', 'sys', 'performance_schema') ORDER BY table_name, ordinal_position"
 	}
 }
 
+// schemaQueryForProfile returns the INFORMATION_SCHEMA query respecting db_type.
+func schemaQueryForProfile(p *profiles.Profile) string {
+	if p.SourceType == profiles.CloudSQL && p.DBType == "mysql" {
+		return "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'sys', 'performance_schema') ORDER BY TABLE_NAME, ORDINAL_POSITION"
+	}
+	return schemaQuery(p.SourceType)
+}
+
 // databasesListQuery returns the query to list databases on the instance.
-func databasesListQuery(st profiles.SourceType) string {
+func databasesListQuery(st profiles.SourceType, dbType string) string {
+	if st == profiles.CloudSQL && dbType == "mysql" {
+		return "SHOW DATABASES"
+	}
 	switch st {
-	case profiles.AlloyDB:
-		return "SELECT datname AS database_name FROM pg_database WHERE datistemplate = false ORDER BY datname"
-	case profiles.CloudSQL:
+	case profiles.AlloyDB, profiles.CloudSQL:
 		return "SELECT datname AS database_name FROM pg_database WHERE datistemplate = false ORDER BY datname"
 	default:
 		return "SHOW DATABASES"

@@ -180,13 +180,21 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 	cmdArgs := toolNameToArgs(params.Name)
 
 	// Build subprocess args, stringifying non-string values.
+	// "question" is a positional arg for ca ask — append it without a flag prefix.
 	args := append(cmdArgs, "--format", s.Format)
+	var positionalArgs []string
 	for k, v := range params.Arguments {
 		sv := fmt.Sprintf("%v", v)
-		if sv != "" {
+		if sv == "" {
+			continue
+		}
+		if k == "question" {
+			positionalArgs = append(positionalArgs, sv)
+		} else {
 			args = append(args, "--"+k, sv)
 		}
 	}
+	args = append(args, positionalArgs...)
 
 	// Execute subprocess.
 	cmd := exec.Command(s.DcxBinary, args...)
