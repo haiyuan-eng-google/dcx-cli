@@ -324,9 +324,11 @@ For `dcx`:
 - [Run 20260410-171926](../benchmarks/results/scorecards/20260410-171926-cdc4d94.md)
   — initial benchmark (dcx vs bq only, no json-minified variant)
 
-## Reproduction (Rust reference)
+## Reproduction
 
-These results were measured against the Rust implementation. To reproduce
+### Reproduce published Rust results
+
+These numbers were measured against the Rust implementation. To reproduce
 the exact numbers, use the Rust repo:
 
 ```bash
@@ -351,7 +353,7 @@ benchmarks/scripts/run_benchmarks.sh --tasks bigquery_overlap --trials 3 --cold-
 python3 benchmarks/scripts/score_results.py benchmarks/results/raw/<run-id>
 ```
 
-### Future: Go validation
+### Future: validate Go against Rust baseline
 
 Once the Go command surface is implemented, run the same suite from this
 repo to validate parity:
