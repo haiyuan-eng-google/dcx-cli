@@ -56,8 +56,8 @@ type ToolsListResult struct {
 
 // ToolCallParams are the params for tools/call.
 type ToolCallParams struct {
-	Name      string            `json:"name"`
-	Arguments map[string]string `json:"arguments"`
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
 }
 
 // ToolCallResult is the result of tools/call.
@@ -149,8 +149,8 @@ func (s *Server) handleToolsList(req JSONRPCRequest) {
 	var tools []MCPTool
 
 	for _, c := range all {
-		// Skip meta and auth commands — not useful as MCP tools.
-		if c.Domain == "meta" || c.Domain == "auth" || c.Domain == "profiles" {
+		// Skip non-data commands — not useful as MCP tools.
+		if c.Domain == "meta" || c.Domain == "auth" || c.Domain == "profiles" || c.Domain == "mcp" {
 			continue
 		}
 		// Only expose read-only commands.
@@ -179,11 +179,12 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 	// Convert tool name back to command args.
 	cmdArgs := toolNameToArgs(params.Name)
 
-	// Build subprocess args.
+	// Build subprocess args, stringifying non-string values.
 	args := append(cmdArgs, "--format", s.Format)
 	for k, v := range params.Arguments {
-		if v != "" {
-			args = append(args, "--"+k, v)
+		sv := fmt.Sprintf("%v", v)
+		if sv != "" {
+			args = append(args, "--"+k, sv)
 		}
 	}
 

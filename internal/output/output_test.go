@@ -151,6 +151,37 @@ func TestRenderTableFromEnvelope(t *testing.T) {
 	}
 }
 
+func TestRenderTableFromStructEnvelope(t *testing.T) {
+	// Simulates the ListEnvelope struct from discovery/executor.go.
+	type ListEnvelope struct {
+		Items         interface{} `json:"items"`
+		Source        string      `json:"source"`
+		NextPageToken string      `json:"next_page_token,omitempty"`
+	}
+
+	value := ListEnvelope{
+		Items: []interface{}{
+			map[string]interface{}{"id": "1", "name": "foo"},
+			map[string]interface{}{"id": "2", "name": "bar"},
+		},
+		Source: "BigQuery",
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Table, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Should extract items from the struct envelope and render tabular rows.
+	if !strings.Contains(out, "id") || !strings.Contains(out, "name") {
+		t.Errorf("Table should render struct envelope items as columns; got:\n%s", out)
+	}
+	if !strings.Contains(out, "foo") || !strings.Contains(out, "bar") {
+		t.Errorf("Table should render struct envelope item values; got:\n%s", out)
+	}
+}
+
 func TestFormatNames(t *testing.T) {
 	names := FormatNames()
 	if len(names) != 4 {

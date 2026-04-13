@@ -136,8 +136,9 @@ func convertParams(params map[string]discoveryParam) map[string]ApiParam {
 	return result
 }
 
-// extractCommandFlags returns params that are NOT mapped to global flags
-// and are query params (not path params handled by global mappings or parent template).
+// extractCommandFlags returns params that should become CLI flags.
+// This includes query params AND path params that are not handled by
+// global flag mappings or parent templates.
 func extractCommandFlags(params map[string]ApiParam, globalMappings map[string]string) []ApiParam {
 	var flags []ApiParam
 	for name, param := range params {
@@ -153,8 +154,9 @@ func extractCommandFlags(params map[string]ApiParam, globalMappings map[string]s
 		if name == "pageToken" || name == "pageSize" {
 			continue
 		}
-		// Only query params become flags; path params are handled via mappings.
-		if param.Location == "query" {
+		// Include both query params and non-global path params (resource IDs
+		// like tableId, databaseId, instance, etc.).
+		if param.Location == "query" || param.Location == "path" {
 			flags = append(flags, param)
 		}
 	}

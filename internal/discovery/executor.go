@@ -262,29 +262,35 @@ func handleErrorResponse(resp *http.Response) error {
 
 func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string) error {
 	for paramName, param := range cmd.Method.Parameters {
-		if !param.Required || param.Location != "path" {
+		if !param.Required {
 			continue
 		}
 
-		// Check if param is mapped to a global flag.
-		if flagName, ok := cmd.Service.GlobalParamMappings[paramName]; ok {
-			if val, ok := globalFlags[flagName]; !ok || val == "" {
-				return fmt.Errorf("required flag --%s is missing", flagName)
+		if param.Location == "path" {
+			// Check if param is mapped to a global flag.
+			if flagName, ok := cmd.Service.GlobalParamMappings[paramName]; ok {
+				if val, ok := globalFlags[flagName]; !ok || val == "" {
+					return fmt.Errorf("required flag --%s is missing", flagName)
+				}
+				continue
 			}
-			continue
-		}
 
-		// Check if param is "parent" and handled by template.
-		if paramName == "parent" && cmd.Service.ParentTemplate != "" {
-			// Validate that all template vars are provided.
-			template := cmd.Service.ParentTemplate
-			for name := range globalFlags {
-				template = strings.ReplaceAll(template, "{"+name+"}", "OK")
+			// Check if param is "parent" and handled by template.
+			if paramName == "parent" && cmd.Service.ParentTemplate != "" {
+				template := cmd.Service.ParentTemplate
+				for name := range globalFlags {
+					template = strings.ReplaceAll(template, "{"+name+"}", "OK")
+				}
+				if strings.Contains(template, "{") {
+					return fmt.Errorf("parent template requires flags not provided: %s", cmd.Service.ParentTemplate)
+				}
+				continue
 			}
-			if strings.Contains(template, "{") {
-				return fmt.Errorf("parent template requires flags not provided: %s", cmd.Service.ParentTemplate)
+
+			// Command-specific path param (resource ID).
+			if val, ok := globalFlags[paramName]; !ok || val == "" {
+				return fmt.Errorf("required flag --%s is missing", camelToKebab(paramName))
 			}
-			continue
 		}
 	}
 	return nil

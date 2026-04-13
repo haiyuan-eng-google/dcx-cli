@@ -123,6 +123,16 @@ func extractTableData(value interface{}) ([][]string, []string, error) {
 
 	// Handle slice types.
 	rv := reflect.ValueOf(value)
+	// For struct types (like ListEnvelope), JSON round-trip to map and retry.
+	if rv.Kind() == reflect.Struct || (rv.Kind() == reflect.Ptr && rv.Elem().Kind() == reflect.Struct) {
+		data, err := json.Marshal(value)
+		if err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(data, &m) == nil {
+				return extractTableData(m)
+			}
+		}
+	}
 	if rv.Kind() == reflect.Slice {
 		if rv.Len() == 0 {
 			return nil, nil, nil

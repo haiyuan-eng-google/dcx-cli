@@ -106,11 +106,16 @@ func registerOneCommand(
 				"location":   *opts.Location,
 			}
 
-			// Collect query params from command-specific flags.
+			// Separate command-specific flags into path params and query params.
 			queryParams := make(map[string]string)
 			for name, val := range flagValues {
 				if *val != "" {
-					queryParams[name] = *val
+					// Check if this flag is a path param — feed it into path resolution.
+					if param, ok := cmd.Method.Parameters[name]; ok && param.Location == "path" {
+						globalFlags[name] = *val
+					} else {
+						queryParams[name] = *val
+					}
 				}
 			}
 			if pageToken != "" {

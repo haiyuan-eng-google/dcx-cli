@@ -88,6 +88,53 @@ func TestParseBigQueryDatasetsListMethod(t *testing.T) {
 	}
 }
 
+func TestTablesGetExposesTableIdFlag(t *testing.T) {
+	docJSON, err := os.ReadFile("../../assets/bigquery_v2_discovery.json")
+	if err != nil {
+		t.Fatalf("reading discovery doc: %v", err)
+	}
+
+	svc := BigQueryConfig()
+	commands, err := Parse(docJSON, svc)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	var getCmd *GeneratedCommand
+	for i := range commands {
+		if commands[i].CommandPath == "tables get" {
+			getCmd = &commands[i]
+			break
+		}
+	}
+	if getCmd == nil {
+		t.Fatal("tables get command not found")
+	}
+
+	hasTableId := false
+	for _, flag := range getCmd.CommandFlags {
+		if flag.Name == "tableId" {
+			hasTableId = true
+			if !flag.Required {
+				t.Error("tableId should be required")
+			}
+			if flag.Location != "path" {
+				t.Errorf("tableId location = %s, want 'path'", flag.Location)
+			}
+		}
+	}
+	if !hasTableId {
+		t.Errorf("tables get must expose tableId as a command flag; got flags: %v",
+			func() []string {
+				var names []string
+				for _, f := range getCmd.CommandFlags {
+					names = append(names, f.Name)
+				}
+				return names
+			}())
+	}
+}
+
 func TestParseSpannerDiscovery(t *testing.T) {
 	docJSON, err := os.ReadFile("../../assets/spanner_v1_discovery.json")
 	if err != nil {

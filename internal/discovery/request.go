@@ -121,6 +121,27 @@ func ResolvePathParams(cmd GeneratedCommand, globalFlags map[string]string) (map
 		}
 	}
 
+	// Pass through command-specific path params (resource IDs like tableId,
+	// databaseId, instance) that were provided as CLI flags and stored
+	// in globalFlags by their Discovery param name.
+	for paramName, param := range cmd.Method.Parameters {
+		if param.Location != "path" {
+			continue
+		}
+		// Skip already-handled params.
+		if _, mapped := cmd.Service.GlobalParamMappings[paramName]; mapped {
+			continue
+		}
+		if paramName == "parent" {
+			continue
+		}
+		if val, ok := globalFlags[paramName]; ok && val != "" {
+			pathParams[paramName] = val
+			flatKey := toFlatPathKey(paramName)
+			pathParams[flatKey] = val
+		}
+	}
+
 	return pathParams, nil
 }
 
