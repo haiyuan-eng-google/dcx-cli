@@ -326,14 +326,16 @@ For `dcx`:
 
 ## Reproduction
 
+> **Reference results.** These numbers were measured against the Rust
+> implementation ([haiyuan-eng-google/bqx-cli](https://github.com/haiyuan-eng-google/bqx-cli)).
+> The Go implementation must meet or beat these numbers before MVP release.
+> The benchmark runner and task specs are carried over and ready to use
+> once the Go command surface is implemented.
+
 ```bash
-# Build dcx (Go)
+# Build dcx (once Go implementation is functional)
 go build -o dcx ./cmd/dcx
 export PATH="$PWD:$PATH"
-
-# Note: these results were measured against the Rust reference
-# implementation (haiyuan-eng-google/bqx-cli). The Go implementation
-# must meet or beat these numbers before MVP release.
 
 # Seed benchmark data
 benchmarks/scripts/seed_bigquery.sh YOUR_PROJECT_ID

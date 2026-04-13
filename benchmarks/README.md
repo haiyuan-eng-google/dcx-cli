@@ -2,6 +2,12 @@
 
 Systematic benchmark comparing `dcx` against `bq` and `gcloud spanner` CLIs.
 
+> **Carried over from [bqx-cli](https://github.com/haiyuan-eng-google/bqx-cli).**
+> Task specs, runner, and scorer are ready to use. The benchmark suite
+> becomes runnable once the Go command surface is implemented. Reference
+> results from the Rust implementation are in
+> [docs/benchmark_results_bigquery.md](../docs/benchmark_results_bigquery.md).
+
 See [docs/cli_benchmark_plan.md](../docs/cli_benchmark_plan.md) for the full
 design rationale, scoring model, and success criteria.
 

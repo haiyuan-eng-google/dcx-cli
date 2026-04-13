@@ -22,17 +22,24 @@ with structured output, typed errors, and an MCP bridge for AI agents.
 
 ## Quick Start
 
+> **Not yet functional.** The Go implementation is in progress.
+> These commands show the target interface — see
+> [docs/go_mvp_plan.md](docs/go_mvp_plan.md) for current status.
+
 ```bash
-# Build from source
+# Build from source (stub only — exits with "not yet implemented")
 go build -o dcx ./cmd/dcx
 
-# First 5 commands
+# Target interface (Phase 1–5):
 dcx auth check                # verify credentials
 dcx datasets list --project-id=myproject
 dcx jobs query --project-id=myproject --query="SELECT 1"
 dcx meta describe jobs query  # inspect any command's contract
 dcx mcp serve                 # start MCP server for agents
 ```
+
+For a working CLI today, use the Rust reference implementation:
+[`haiyuan-eng-google/bqx-cli`](https://github.com/haiyuan-eng-google/bqx-cli).
 
 ## MVP Scope
 
@@ -64,9 +71,11 @@ for the full plan.
 - `generate-skills`, Gemini manifest, shell completions
 - Model Armor sanitization
 
-## Output Format
+## Output Format (target contract)
 
-All commands default to structured JSON. `--format` controls output.
+All commands will default to structured JSON. `--format` controls output.
+These examples show the target output shape from the
+[Rust reference implementation](https://github.com/haiyuan-eng-google/bqx-cli):
 
 ```bash
 dcx datasets list --project-id=myproject --format=json-minified
