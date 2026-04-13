@@ -28,5 +28,8 @@ Thumbs.db
 # Benchmark results (keep scorecards, ignore raw trial data)
 benchmarks/results/raw/*/
 
+# Worktrees
+.worktrees/
+
 # Build
 dist/

@@ -2,11 +2,17 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/haiyuan-eng-google/dcx-cli/internal/cli"
+	dcxerrors "github.com/haiyuan-eng-google/dcx-cli/internal/errors"
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "dcx: not yet implemented — see docs/go_mvp_plan.md")
-	os.Exit(1)
+	app := cli.NewApp()
+
+	if err := app.Root.Execute(); err != nil {
+		dcxerrors.Emit(dcxerrors.Internal, err.Error(), "")
+		os.Exit(dcxerrors.ExitInfra)
+	}
 }
