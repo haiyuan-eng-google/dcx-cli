@@ -72,6 +72,12 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	registry.Register(contracts.MetaCommandsContract())
 	registry.Register(contracts.MetaDescribeContract())
 
+	// Register Discovery-driven commands.
+	app.registerBigQueryDiscoveryCommands()
+
+	// Register static commands.
+	app.registerJobsQueryCommand()
+
 	return app
 }
 
