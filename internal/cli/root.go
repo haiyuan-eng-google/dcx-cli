@@ -74,6 +74,7 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 
 	// Register Discovery-driven commands.
 	app.registerBigQueryDiscoveryCommands()
+	app.registerDataCloudDiscoveryCommands()
 
 	// Register static commands.
 	app.registerJobsQueryCommand()
