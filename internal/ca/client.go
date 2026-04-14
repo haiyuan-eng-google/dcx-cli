@@ -13,14 +13,13 @@ import (
 )
 
 const (
-	// CA Chat API endpoint (BigQuery DataAgent).
-	chatAPIURL = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s/dataAgents:chat"
+	// All CA endpoints are on the geminidataanalytics v1alpha API.
+	// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha
 
-	// CA QueryData API endpoint (Spanner, AlloyDB, Cloud SQL).
-	queryDataAPIURL = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s:queryData"
+	// queryData: NL-to-SQL for all source types (BigQuery, Spanner, AlloyDB, Cloud SQL, Looker).
+	queryDataURL = "https://geminidataanalytics.googleapis.com/v1alpha/projects/%s/locations/%s:queryData"
 
-	// Data Agents management API (v1alpha).
-	// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations.dataAgents
+	// Data Agents management endpoints.
 	dataAgentsBaseURL = "https://geminidataanalytics.googleapis.com/v1alpha/projects/%s/locations/%s/dataAgents"
 	dataAgentURL      = "https://geminidataanalytics.googleapis.com/v1alpha/%s" // takes full resource name
 )
@@ -38,18 +37,13 @@ func NewClient(httpClient *http.Client) *Client {
 	return &Client{HTTPClient: httpClient}
 }
 
-// Ask routes a question to the appropriate CA API based on profile source type.
+// Ask sends a question to the queryData endpoint, routing to the correct
+// datasource type based on the profile. All source types use the same
+// geminidataanalytics.googleapis.com/v1alpha queryData endpoint.
+// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations/queryData
 func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
-	if profile != nil && profile.IsQueryDataSource() {
-		return c.askQueryData(ctx, token, profile, question)
-	}
-	return c.askChat(ctx, token, profile, question, agent, tables)
-}
-
-// askChat sends a question to the CA Chat API (BigQuery/Looker DataAgent).
-func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
 	projectID := ""
-	location := "us" // default location for CA
+	location := "us"
 	if profile != nil {
 		projectID = profile.Project
 		if profile.Location != "" {
@@ -60,144 +54,78 @@ func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Pr
 		return nil, fmt.Errorf("project ID is required for ca ask")
 	}
 
-	url := fmt.Sprintf(chatAPIURL, projectID, location)
-
+	// Build the queryData request with the documented schema.
 	reqBody := map[string]interface{}{
-		"question": question,
+		"prompt": question,
+		"context": map[string]interface{}{
+			"datasourceReferences": buildDatasourceReferences(profile, tables),
+		},
+		"generationOptions": map[string]interface{}{
+			"generateQueryResult":           true,
+			"generateNaturalLanguageAnswer": true,
+			"generateExplanation":           true,
+		},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling queryData request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf(queryDataURL, projectID, location)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating queryData request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("queryData API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readAPIError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading queryData response: %w", err)
+	}
+
+	// Parse the documented QueryDataResponse.
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("parsing queryData response: %w", err)
+	}
+
+	sql, _ := raw["generatedQuery"].(string)
+	explanation, _ := raw["intentExplanation"].(string)
+	nlAnswer, _ := raw["naturalLanguageAnswer"].(string)
+
+	result := &AskResult{
+		Question:    question,
+		SQL:         sql,
+		Explanation: explanation,
+		Source:      sourceName(profile.SourceType),
+	}
+	if nlAnswer != "" {
+		result.Explanation = nlAnswer
+	}
+	if qr, ok := raw["queryResult"]; ok {
+		result.Results = qr
 	}
 	if agent != "" {
-		reqBody["agent"] = agent
-	}
-	if tables != "" {
-		reqBody["tables"] = tables
-	}
-	// Looker profile: pass explores context.
-	if profile != nil && profile.SourceType == profiles.Looker {
-		if profile.LookerInstanceURL != "" {
-			reqBody["looker_instance_url"] = profile.LookerInstanceURL
-		}
-		if len(profile.LookerExplores) > 0 {
-			reqBody["looker_explores"] = profile.LookerExplores
-		}
+		result.Agent = agent
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling chat request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating chat request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("chat API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return nil, readAPIError(resp)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading chat response: %w", err)
-	}
-
-	var chatResp ChatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("parsing chat response: %w", err)
-	}
-
-	source := "BigQuery"
-	if profile != nil && profile.SourceType == profiles.Looker {
-		source = "Looker"
-	}
-
-	return &AskResult{
-		Question:    chatResp.Question,
-		SQL:         chatResp.SQL,
-		Results:     chatResp.Results,
-		Explanation: chatResp.Explanation,
-		Source:      source,
-		Agent:       chatResp.Agent,
-	}, nil
+	return result, nil
 }
 
-// askQueryData sends a question to the CA QueryData API (Spanner/AlloyDB/CloudSQL).
-func (c *Client) askQueryData(ctx context.Context, token string, profile *profiles.Profile, question string) (*AskResult, error) {
-	if profile.Project == "" {
-		return nil, fmt.Errorf("project is required in profile")
-	}
-
-	location := profile.Location
-	if location == "" {
-		location = "us"
-	}
-
-	url := fmt.Sprintf(queryDataAPIURL, profile.Project, location)
-
-	reqBody := QueryDataRequest{
-		Question:   question,
-		ProjectID:  profile.Project,
-		SourceType: string(profile.SourceType),
-		Location:   profile.Location,
-		InstanceID: profile.InstanceID,
-		DatabaseID: profile.DatabaseID,
-		ClusterID:  profile.ClusterID,
-		DBType:     profile.DBType,
-	}
-	if profile.ContextSetID != "" {
-		reqBody.AgentContextReference = profile.ContextSetID
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling querydata request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating querydata request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("querydata API request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return nil, readAPIError(resp)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading querydata response: %w", err)
-	}
-
-	var qdResp QueryDataResponse
-	if err := json.Unmarshal(respBody, &qdResp); err != nil {
-		return nil, fmt.Errorf("parsing querydata response: %w", err)
-	}
-
-	return &AskResult{
-		Question:    qdResp.Question,
-		SQL:         qdResp.SQL,
-		Results:     qdResp.Results,
-		Explanation: qdResp.Explanation,
-		Source:      sourceName(profile.SourceType),
-	}, nil
-}
-
-// AskQueryDataRaw executes a raw SQL-like question via QueryData and returns
-// the raw response. Used by database helpers (schema describe, databases list).
+// AskQueryDataRaw executes a question via queryData and returns the raw
+// response. Used by database helpers (schema describe, databases list).
 func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *profiles.Profile, question string) (map[string]interface{}, error) {
 	if profile.Project == "" {
 		return nil, fmt.Errorf("project is required in profile")
@@ -208,37 +136,32 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 		location = "us"
 	}
 
-	url := fmt.Sprintf(queryDataAPIURL, profile.Project, location)
-
-	reqBody := QueryDataRequest{
-		Question:   question,
-		ProjectID:  profile.Project,
-		SourceType: string(profile.SourceType),
-		Location:   profile.Location,
-		InstanceID: profile.InstanceID,
-		DatabaseID: profile.DatabaseID,
-		ClusterID:  profile.ClusterID,
-		DBType:     profile.DBType,
-	}
-	if profile.ContextSetID != "" {
-		reqBody.AgentContextReference = profile.ContextSetID
+	reqBody := map[string]interface{}{
+		"prompt": question,
+		"context": map[string]interface{}{
+			"datasourceReferences": buildDatasourceReferences(profile, ""),
+		},
+		"generationOptions": map[string]interface{}{
+			"generateQueryResult": true,
+		},
 	}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling querydata request: %w", err)
+		return nil, fmt.Errorf("marshaling queryData request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	apiURL := fmt.Sprintf(queryDataURL, profile.Project, location)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("creating querydata request: %w", err)
+		return nil, fmt.Errorf("creating queryData request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("querydata API request failed: %w", err)
+		return nil, fmt.Errorf("queryData API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -248,12 +171,12 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading querydata response: %w", err)
+		return nil, fmt.Errorf("reading queryData response: %w", err)
 	}
 
 	var raw map[string]interface{}
 	if err := json.Unmarshal(respBody, &raw); err != nil {
-		return nil, fmt.Errorf("parsing querydata response: %w", err)
+		return nil, fmt.Errorf("parsing queryData response: %w", err)
 	}
 	return raw, nil
 }
@@ -567,6 +490,85 @@ func parseBQTableRef(ref string) BigQueryTableReference {
 		return BigQueryTableReference{DatasetID: parts[0], TableID: parts[1]}
 	default:
 		return BigQueryTableReference{TableID: ref}
+	}
+}
+
+// buildDatasourceReferences constructs the correct nested datasource
+// reference for the queryData API based on the profile's source type.
+func buildDatasourceReferences(profile *profiles.Profile, inlineTables string) map[string]interface{} {
+	if profile == nil {
+		return nil
+	}
+
+	switch profile.SourceType {
+	case profiles.BigQuery:
+		var tableRefs []map[string]string
+		if inlineTables != "" {
+			for _, ref := range strings.Split(inlineTables, ",") {
+				tableRefs = append(tableRefs, parseBQTableRefMap(strings.TrimSpace(ref)))
+			}
+		}
+		return map[string]interface{}{
+			"bq": map[string]interface{}{
+				"tableReferences": tableRefs,
+			},
+		}
+
+	case profiles.Spanner:
+		return map[string]interface{}{
+			"spannerReference": map[string]interface{}{
+				"projectId":  profile.Project,
+				"instanceId": profile.InstanceID,
+				"databaseId": profile.DatabaseID,
+			},
+		}
+
+	case profiles.AlloyDB:
+		return map[string]interface{}{
+			"alloydb": map[string]interface{}{
+				"projectId":  profile.Project,
+				"locationId": profile.Location,
+				"clusterId":  profile.ClusterID,
+				"instanceId": profile.InstanceID,
+				"databaseId": profile.DatabaseID,
+			},
+		}
+
+	case profiles.CloudSQL:
+		return map[string]interface{}{
+			"cloudSqlReference": map[string]interface{}{
+				"projectId":  profile.Project,
+				"instanceId": profile.InstanceID,
+				"databaseId": profile.DatabaseID,
+			},
+		}
+
+	case profiles.Looker:
+		ref := map[string]interface{}{}
+		if profile.LookerInstanceURL != "" {
+			ref["instanceUri"] = profile.LookerInstanceURL
+		}
+		if len(profile.LookerExplores) > 0 {
+			ref["exploreReferences"] = profile.LookerExplores
+		}
+		return map[string]interface{}{
+			"looker": ref,
+		}
+
+	default:
+		return nil
+	}
+}
+
+func parseBQTableRefMap(ref string) map[string]string {
+	parts := strings.SplitN(ref, ".", 3)
+	switch len(parts) {
+	case 3:
+		return map[string]string{"projectId": parts[0], "datasetId": parts[1], "tableId": parts[2]}
+	case 2:
+		return map[string]string{"datasetId": parts[0], "tableId": parts[1]}
+	default:
+		return map[string]string{"tableId": ref}
 	}
 }
 
