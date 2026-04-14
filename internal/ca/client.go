@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/profiles"
@@ -294,14 +295,12 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 
 // CreateAgent creates a data agent synchronously via :createSync.
 // Uses publishedContext (not stagingContext) matching the Rust implementation.
-// Agent management uses locations/global (not regional like chat/queryData).
-func (c *Client) CreateAgent(ctx context.Context, token, projectID, location string, opts CreateAgentOpts) (*CreateAgentResult, error) {
+// Agent management always uses locations/global; regional locations are rejected by the API.
+func (c *Client) CreateAgent(ctx context.Context, token, projectID, _ string, opts CreateAgentOpts) (*CreateAgentResult, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("project ID is required")
 	}
-	if location == "" {
-		location = "global"
-	}
+	location := "global"
 
 	tableRefs := buildBQTableRefs(strings.Join(opts.Tables, ","))
 	for _, v := range opts.Views {
@@ -373,14 +372,12 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 }
 
 // ListAgents lists all data agents in the given project, handling pagination.
-// Agent management uses locations/global (not regional like chat/queryData).
-func (c *Client) ListAgents(ctx context.Context, token, projectID, location string) (*AgentsListResult, error) {
+// Agent management always uses locations/global; regional locations are rejected by the API.
+func (c *Client) ListAgents(ctx context.Context, token, projectID, _ string) (*AgentsListResult, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("project ID is required")
 	}
-	if location == "" {
-		location = "global"
-	}
+	location := "global"
 
 	baseURL := fmt.Sprintf(dataAgentsURLFmt, projectID, location)
 	var allAgents []AgentSummary
@@ -389,7 +386,7 @@ func (c *Client) ListAgents(ctx context.Context, token, projectID, location stri
 	for {
 		apiURL := baseURL
 		if pageToken != "" {
-			apiURL += "?pageToken=" + pageToken
+			apiURL += "?pageToken=" + url.QueryEscape(pageToken)
 		}
 
 		httpReq, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
@@ -460,14 +457,12 @@ func extractErrorMessage(body []byte, statusCode int) string {
 
 // AddVerifiedQuery appends example queries to an existing agent via GET + :updateSync.
 // Uses publishedContext (matching Rust implementation).
-// Agent management uses locations/global (not regional like chat/queryData).
-func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, location string, opts PatchAgentOpts) (*AddVerifiedQueryResult, error) {
+// Agent management always uses locations/global; regional locations are rejected by the API.
+func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, _ string, opts PatchAgentOpts) (*AddVerifiedQueryResult, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("project ID is required")
 	}
-	if location == "" {
-		location = "global"
-	}
+	location := "global"
 
 	// 1. GET the existing agent to read current exampleQueries.
 	agentResourceName := fmt.Sprintf("projects/%s/locations/%s/dataAgents/%s", projectID, location, opts.AgentName)
