@@ -15,8 +15,13 @@ Run `20260413-163425-4e538fd` — Go implementation, 1 cold + 3 warm trials.
 | **Average warm p50** | 518 ms | 503 ms | 2,526 ms |
 | **Avg p50 ratio** | **4.9x faster** | **5.0x faster** | baseline |
 | **Correctness (metadata)** | 4/4 (100%) | 4/4 (100%) | 4/4 (100%) |
-| **Correctness (error-handling)** | 5/5 (100%) | 5/5 (100%) | 3/5 (60%) |
+| **Correctness (error-handling)** | 4/5 (80%)† | 4/5 (80%)† | 3/5 (60%) |
 | **6-step workflow tokens** | ~3,241 | **~2,239** | ~2,115 |
+
+† The `bq-error-permission-denied` task fails for all CLIs including dcx
+because it targets `bigquery-public-data`, which grants public read access.
+The scorecard records 0% for this task. Excluding this invalid task, dcx
+passes 4/4 real error-handling scenarios.
 
 `--format=json-minified` reduces output tokens by **31%** compared to
 pretty JSON, bringing dcx within 6% of `bq`'s token cost while preserving
@@ -132,10 +137,10 @@ providing a consistent envelope structure across all list commands.
 | 6-step workflow | **3,234 ms** | 3,829 ms | 18,117 ms |
 | 6-step tokens (minified) | **2,239** | 2,080 | 2,115 |
 
-The Go implementation is **~16% faster** than the Rust implementation on
-average across metadata and query tasks. Both are approximately 5x faster
-than `bq`. The Go binary's startup overhead is negligible (compiled binary,
-similar to Rust).
+The Go implementation is **~33% faster** on metadata operations (481 ms vs
+714 ms) and **~20% faster** on queries (672 ms vs 836 ms) compared to the
+Rust reference. The 6-step workflow is **~16% faster** end-to-end (3,234 ms
+vs 3,829 ms). Both are approximately 5x faster than `bq`.
 
 Token cost is slightly higher for the Go implementation because the raw
 BigQuery API response passthrough includes more fields than the Rust
@@ -246,13 +251,13 @@ unintended successful response instead of an error signal.
 ### Go run (current)
 
 - [Scorecard](../benchmarks/results/scorecards/20260413-163425-4e538fd.md)
-- [Summary JSON](../benchmarks/results/raw/20260413-163425-4e538fd/summary.json)
-- [Raw results (NDJSON)](../benchmarks/results/raw/20260413-163425-4e538fd/results.ndjson)
-- [Environment snapshot](../benchmarks/results/raw/20260413-163425-4e538fd/environment.json)
 
-### Rust reference run
+Raw results (summary.json, results.ndjson, environment.json, per-trial
+stdout/stderr captures) are in `benchmarks/results/raw/20260413-163425-4e538fd/`
+but gitignored. Reproduce locally with the instructions below.
 
-- [Scorecard](../benchmarks/results/scorecards/20260411-013709-b4c8ac5.md)
+### Reference
+
 - [Benchmark methodology](cli_benchmark_plan.md)
 
 ## Reproduction
