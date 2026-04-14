@@ -4,7 +4,7 @@ An agent-native CLI for Google Cloud's Data Cloud, built in Go.
 One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker —
 with structured output, typed errors, and an MCP bridge for AI agents.
 
-> **Status:** Go MVP functional — 35 commands across 10 domains.
+> **Status:** Go MVP functional — 38 commands across 10 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
 > See [docs/benchmark_results_bigquery.md](docs/benchmark_results_bigquery.md)
 > for measured results.
@@ -43,11 +43,15 @@ dcx meta describe jobs query
 # Natural-language query via CA
 dcx ca ask "top errors yesterday" --profile my-spanner-profile
 
+# Create a data agent and ask it questions
+dcx ca create-agent --name=sales-agent --tables=myproject.sales.orders --project-id=myproject
+dcx ca ask "revenue by region this quarter" --agent=sales-agent --project-id=myproject
+
 # Start MCP server for agents
 dcx mcp serve
 ```
 
-## Commands (35 total)
+## Commands (38 total)
 
 | Surface | Commands |
 |---|---|
@@ -56,7 +60,7 @@ dcx mcp serve
 | **AlloyDB** | `clusters list/get`, `instances list/get`, `databases list`, `schema describe` |
 | **Cloud SQL** | `instances list/get`, `databases list/get`, `schema describe` |
 | **Looker** | `instances list/get`, `explores list`, `dashboards get` |
-| **CA** | `ca ask --profile ...` (natural-language queries across all sources) |
+| **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query` |
 | **Auth** | `auth status`, `auth check` |
 | **Profiles** | `profiles list`, `profiles validate`, `profiles test` |
 | **Introspection** | `meta commands`, `meta describe` |
@@ -68,7 +72,6 @@ Run `dcx meta commands` for the full machine-readable list.
 ### Deferred to P1
 
 - Agent Analytics SDK (12 commands, 6 evaluators)
-- CA agent management (`create-agent`, `list-agents`, `add-verified-query`)
 - `generate-skills`, Gemini manifest, shell completions
 - Model Armor sanitization
 
@@ -203,7 +206,7 @@ internal/
   auth/                         # 5-tier resolver
   discovery/                    # Discovery Document parser, command generation
   bigquery/                     # jobs query (static), BQ client
-  ca/                           # CA client (Chat + QueryData)
+  ca/                           # CA client (Chat + QueryData + Agent management)
   datacloud/                    # database helpers (schema describe)
   looker/                       # Looker Admin SDK client
   mcp/                          # MCP server (JSON-RPC 2.0 / stdio)

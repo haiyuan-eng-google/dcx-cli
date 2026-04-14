@@ -58,6 +58,8 @@ dcx ca add-verified-query \
 
 ## Notes
 
-- Creates resources — requires appropriate IAM permissions
+- Agent management always uses `locations/global` — the `--location` flag is ignored
+- Requires `roles/geminidataanalytics.dataAgentCreator` (or `roles/owner`)
+- Requires `geminidataanalytics.googleapis.com` and `cloudaicompanion.googleapis.com` APIs enabled
 - Table refs must be fully qualified: `project.dataset.table`
 - Only supports BigQuery tables/views

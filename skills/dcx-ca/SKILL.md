@@ -16,7 +16,9 @@ Use when the user wants to:
 
 - BigQuery: `--project-id` (or `DCX_PROJECT`)
 - All other sources: `--profile` (YAML file defining source connection)
-- CA uses `--location` (defaults to `US`) but does **not** require `--dataset-id`
+- `ca ask` uses `--location` (defaults to `US`) for chat/queryData endpoints
+- Agent management (`create-agent`, `list-agents`, `add-verified-query`) always uses `locations/global` — the `--location` flag is ignored for these commands
+- Does **not** require `--dataset-id`
 
 See **dcx-bigquery** for authentication.
 
@@ -75,7 +77,7 @@ dcx ca ask --profile app-cloudsql.yaml "active users today"
 ## Constraints
 
 - CA API is currently in preview
-- Data agents are project-scoped and support BigQuery only
+- Data agents are project-scoped, BigQuery-only, and live at `locations/global`
 - Database sources (AlloyDB, Spanner, Cloud SQL) do not support data agents or visualizations
 - Looker profiles work with `ca ask` but not `ca create-agent`
 

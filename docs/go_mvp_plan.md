@@ -145,8 +145,9 @@ deferred.
 For MVP, prioritize the profile-driven path over inline BigQuery-only agent
 management flows.
 
-`ca create-agent`, `ca list-agents`, and `ca add-verified-query` move to P1
-unless beta users show they are required for first-run value.
+`ca create-agent`, `ca list-agents`, and `ca add-verified-query` — **shipped**
+(merged in PR #7). Agent management uses `locations/global`; the `--location`
+flag is ignored for these commands.
 
 ### P0: Auth and profiles
 
@@ -210,7 +211,7 @@ CLI can continue serving this surface during the Go migration.
 - `generate-skills`
 - Gemini manifest generation (`meta gemini-tools`)
 - shell completions
-- `ca create-agent`, `ca list-agents`, `ca add-verified-query`
+- ~~`ca create-agent`, `ca list-agents`, `ca add-verified-query`~~ — **shipped** (PR #7)
 - Model Armor sanitization (`--sanitize`)
 
 ## Why this MVP, specifically
@@ -252,7 +253,7 @@ Key modules and estimated porting effort:
 | Skill templates | ~450 | `skills/` | `internal/skills/` |
 | **Total P0 source** | **~14,600** | | |
 | Analytics (P1) | ~4,170 | `commands/analytics/` | deferred |
-| CA management (P1) | ~400 | `commands/ca/` (3 cmds) | deferred |
+| CA management | ~400 | `commands/ca/` (3 cmds) | `internal/ca/` + `internal/cli/ca.go` — **shipped** |
 | Tests | ~8,000+ | `tests/` | `*_test.go` alongside packages |
 | Snapshot golden files | ~50 files | `tests/snapshots/` | `testdata/` |
 
@@ -716,7 +717,7 @@ The right message is:
 
 ## Implementation status
 
-All 6 phases are complete. The Go MVP is functional with 35 commands
+All 6 phases are complete. The Go MVP is functional with 38 commands
 across 10 domains, benchmarked at 5x faster than `bq`.
 
 | Phase | Status | PR |
