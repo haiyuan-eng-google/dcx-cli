@@ -44,6 +44,56 @@ type QueryDataResponse struct {
 	SourceType  string      `json:"source_type"`
 }
 
+// VerifiedQuery is a pre-authored question/SQL pair that improves agent accuracy.
+type VerifiedQuery struct {
+	Question string `json:"question" yaml:"question"`
+	Query    string `json:"query" yaml:"query"`
+}
+
+// CreateAgentRequest is the request body for creating a data agent.
+type CreateAgentRequest struct {
+	Name             string          `json:"name"`
+	Tables           []string        `json:"tables"`
+	Views            []string        `json:"views,omitempty"`
+	VerifiedQueries  []VerifiedQuery `json:"verified_queries,omitempty"`
+	Instructions     string          `json:"instructions,omitempty"`
+}
+
+// AgentSummary is the compact representation for list-agents output.
+type AgentSummary struct {
+	Name            string   `json:"name"`
+	Tables          []string `json:"tables,omitempty"`
+	VerifiedQueries int      `json:"verified_queries_count,omitempty"`
+	CreateTime      string   `json:"create_time,omitempty"`
+}
+
+// AgentsListResult is the output of ca list-agents.
+type AgentsListResult struct {
+	Items  []AgentSummary `json:"items"`
+	Source string         `json:"source"`
+}
+
+// CreateAgentResult is the output of ca create-agent.
+type CreateAgentResult struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// AddVerifiedQueryRequest is the request body for adding a verified query.
+type AddVerifiedQueryRequest struct {
+	Agent    string `json:"agent"`
+	Question string `json:"question"`
+	Query    string `json:"query"`
+}
+
+// AddVerifiedQueryResult is the output of ca add-verified-query.
+type AddVerifiedQueryResult struct {
+	Agent    string `json:"agent"`
+	Question string `json:"question"`
+	Status   string `json:"status"`
+}
+
 // AskResult is the unified output for ca ask across all source types.
 type AskResult struct {
 	Question    string      `json:"question"`

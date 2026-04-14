@@ -110,6 +110,7 @@ func TestCommandDiscovery(t *testing.T) {
 		"dcx looker explores list", "dcx looker dashboards get",
 		// CA
 		"dcx ca ask",
+		"dcx ca create-agent", "dcx ca list-agents", "dcx ca add-verified-query",
 		// Auth
 		"dcx auth check", "dcx auth status",
 		// Profiles
@@ -131,8 +132,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 35 {
-		t.Errorf("expected at least 35 commands, got %d", len(commands))
+	if len(commands) < 38 {
+		t.Errorf("expected at least 38 commands, got %d", len(commands))
 	}
 }
 
@@ -421,9 +422,6 @@ func TestSkillAlignment(t *testing.T) {
 	p1Commands := map[string]bool{
 		"dcx auth login":              true,
 		"dcx auth logout":             true,
-		"dcx ca create-agent":         true,
-		"dcx ca list-agents":          true,
-		"dcx ca add-verified-query":   true,
 		"dcx looker explores get":     true,
 		"dcx looker dashboards list":  true,
 		"dcx generate-skills":         true,

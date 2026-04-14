@@ -17,6 +17,11 @@ const (
 
 	// CA QueryData API endpoint (Spanner, AlloyDB, Cloud SQL).
 	queryDataAPIURL = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s:queryData"
+
+	// CA DataAgent management endpoints.
+	createAgentURL       = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s/dataAgents"
+	listAgentsURL        = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s/dataAgents"
+	addVerifiedQueryURL  = "https://datacatalog.googleapis.com/v1/projects/%s/locations/%s/dataAgents/%s:addVerifiedQuery"
 )
 
 // Client provides access to the Conversational Analytics APIs.
@@ -250,6 +255,177 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 		return nil, fmt.Errorf("parsing querydata response: %w", err)
 	}
 	return raw, nil
+}
+
+// CreateAgent creates a new BigQuery data agent.
+func (c *Client) CreateAgent(ctx context.Context, token, projectID, location string, req CreateAgentRequest) (*CreateAgentResult, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID is required")
+	}
+	if location == "" {
+		location = "us"
+	}
+
+	url := fmt.Sprintf(createAgentURL, projectID, location)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling create-agent request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("create-agent API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readAPIError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading create-agent response: %w", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("parsing create-agent response: %w", err)
+	}
+
+	name := ""
+	if n, ok := raw["name"].(string); ok {
+		name = n
+	}
+
+	return &CreateAgentResult{
+		Name:   name,
+		Status: "created",
+	}, nil
+}
+
+// ListAgents lists data agents in the given project.
+func (c *Client) ListAgents(ctx context.Context, token, projectID, location string) (*AgentsListResult, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID is required")
+	}
+	if location == "" {
+		location = "us"
+	}
+
+	url := fmt.Sprintf(listAgentsURL, projectID, location)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("list-agents API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readAPIError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading list-agents response: %w", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("parsing list-agents response: %w", err)
+	}
+
+	var agents []AgentSummary
+	if items, ok := raw["dataAgents"].([]interface{}); ok {
+		for _, item := range items {
+			if m, ok := item.(map[string]interface{}); ok {
+				agent := AgentSummary{}
+				if n, ok := m["name"].(string); ok {
+					agent.Name = n
+				}
+				if t, ok := m["createTime"].(string); ok {
+					agent.CreateTime = t
+				}
+				if tables, ok := m["tables"].([]interface{}); ok {
+					for _, t := range tables {
+						if s, ok := t.(string); ok {
+							agent.Tables = append(agent.Tables, s)
+						}
+					}
+				}
+				if vqs, ok := m["verifiedQueries"].([]interface{}); ok {
+					agent.VerifiedQueries = len(vqs)
+				}
+				agents = append(agents, agent)
+			}
+		}
+	}
+
+	if agents == nil {
+		agents = []AgentSummary{}
+	}
+
+	return &AgentsListResult{
+		Items:  agents,
+		Source: "BigQuery",
+	}, nil
+}
+
+// AddVerifiedQuery adds a verified query to an existing data agent.
+func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, location string, req AddVerifiedQueryRequest) (*AddVerifiedQueryResult, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID is required")
+	}
+	if location == "" {
+		location = "us"
+	}
+
+	url := fmt.Sprintf(addVerifiedQueryURL, projectID, location, req.Agent)
+
+	body, err := json.Marshal(map[string]interface{}{
+		"question": req.Question,
+		"query":    req.Query,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling add-verified-query request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("add-verified-query API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readAPIError(resp)
+	}
+
+	return &AddVerifiedQueryResult{
+		Agent:    req.Agent,
+		Question: req.Question,
+		Status:   "added",
+	}, nil
 }
 
 func readAPIError(resp *http.Response) error {
