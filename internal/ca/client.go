@@ -13,15 +13,20 @@ import (
 )
 
 const (
-	// All CA endpoints are on the geminidataanalytics v1alpha API.
-	// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha
+	// CA base URL — v1beta matches the working Rust implementation.
+	caBaseURL = "https://geminidataanalytics.googleapis.com/v1beta"
 
-	// queryData: NL-to-SQL for all source types (BigQuery, Spanner, AlloyDB, Cloud SQL, Looker).
-	queryDataURL = "https://geminidataanalytics.googleapis.com/v1alpha/projects/%s/locations/%s:queryData"
+	// :chat endpoint for BigQuery/Looker/Studio (streaming messages).
+	chatURLFmt = caBaseURL + "/projects/%s/locations/%s:chat"
 
-	// Data Agents management endpoints.
-	dataAgentsBaseURL = "https://geminidataanalytics.googleapis.com/v1alpha/projects/%s/locations/%s/dataAgents"
-	dataAgentURL      = "https://geminidataanalytics.googleapis.com/v1alpha/%s" // takes full resource name
+	// :queryData endpoint for database sources (Spanner, AlloyDB, Cloud SQL).
+	queryDataURLFmt = caBaseURL + "/projects/%s/locations/%s:queryData"
+
+	// Agent management endpoints (sync variants return result directly).
+	dataAgentsURLFmt    = caBaseURL + "/projects/%s/locations/%s/dataAgents"
+	dataAgentURLFmt     = caBaseURL + "/%s" // takes full resource name
+	createAgentSyncFmt  = caBaseURL + "/projects/%s/locations/%s/dataAgents:createSync?dataAgentId=%s"
+	updateAgentSyncFmt  = caBaseURL + "/%s:updateSync?updateMask=%s"
 )
 
 // Client provides access to the Conversational Analytics APIs.
@@ -37,11 +42,20 @@ func NewClient(httpClient *http.Client) *Client {
 	return &Client{HTTPClient: httpClient}
 }
 
-// Ask sends a question to the queryData endpoint, routing to the correct
-// datasource type based on the profile. All source types use the same
-// geminidataanalytics.googleapis.com/v1alpha queryData endpoint.
-// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations/queryData
+// Ask routes a question to the appropriate CA endpoint based on source type.
+// BigQuery/Looker/Studio use :chat (streaming messages).
+// Spanner/AlloyDB/CloudSQL use :queryData (NL-to-SQL).
+// This matches the working Rust implementation.
 func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
+	if profile != nil && profile.IsQueryDataSource() {
+		return c.askQueryData(ctx, token, profile, question)
+	}
+	return c.askChat(ctx, token, profile, question, agent, tables)
+}
+
+// askChat sends a question to the :chat endpoint (BigQuery/Looker/Studio).
+// Uses messages + userMessage + inlineContext structure.
+func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
 	projectID := ""
 	location := "us"
 	if profile != nil {
@@ -54,11 +68,110 @@ func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profil
 		return nil, fmt.Errorf("project ID is required for ca ask")
 	}
 
-	// Build the queryData request with the documented schema.
-	reqBody := map[string]interface{}{
+	userMessage := map[string]interface{}{
+		"userMessage": map[string]interface{}{
+			"text": question,
+		},
+	}
+
+	body := map[string]interface{}{
+		"messages": []interface{}{userMessage},
+	}
+
+	// Agent context (BigQuery with named agent).
+	if agent != "" {
+		agentResource := fmt.Sprintf("projects/%s/locations/%s/dataAgents/%s", projectID, location, agent)
+		body["data_agent_context"] = map[string]interface{}{
+			"data_agent": agentResource,
+		}
+	}
+
+	// Inline tables (BigQuery without agent).
+	if agent == "" && tables != "" {
+		tableRefs := buildBQTableRefs(tables)
+		body["inlineContext"] = map[string]interface{}{
+			"datasource_references": map[string]interface{}{
+				"bq": map[string]interface{}{
+					"tableReferences": tableRefs,
+				},
+			},
+		}
+	}
+
+	// Looker profile: pass explore references.
+	if profile != nil && profile.SourceType == profiles.Looker {
+		exploreRefs := buildLookerExploreRefs(profile)
+		body["inlineContext"] = map[string]interface{}{
+			"datasourceReferences": map[string]interface{}{
+				"looker": map[string]interface{}{
+					"exploreReferences": exploreRefs,
+				},
+			},
+		}
+	}
+
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling chat request: %w", err)
+	}
+
+	apiURL := fmt.Sprintf(chatURLFmt, projectID, location)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, fmt.Errorf("creating chat request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-server-timeout", "300")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("chat API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readAPIError(resp)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading chat response: %w", err)
+	}
+
+	// Parse streaming response (JSON array of messages).
+	result, err := parseChatResponse(respBody, question, agent)
+	if err != nil {
+		return nil, err
+	}
+
+	if profile != nil {
+		result.Source = sourceName(profile.SourceType)
+	} else {
+		result.Source = "BigQuery"
+	}
+
+	return result, nil
+}
+
+// askQueryData sends a question to the :queryData endpoint (Spanner/AlloyDB/CloudSQL).
+// Uses prompt + context.datasourceReferences structure.
+func (c *Client) askQueryData(ctx context.Context, token string, profile *profiles.Profile, question string) (*AskResult, error) {
+	if profile.Project == "" {
+		return nil, fmt.Errorf("project is required in profile")
+	}
+
+	location := profile.Location
+	if location == "" {
+		location = "us"
+	}
+
+	datasourceRef := buildQueryDataDatasourceRef(profile)
+
+	body := map[string]interface{}{
 		"prompt": question,
 		"context": map[string]interface{}{
-			"datasourceReferences": buildDatasourceReferences(profile, tables),
+			"datasourceReferences": datasourceRef,
 		},
 		"generationOptions": map[string]interface{}{
 			"generateQueryResult":           true,
@@ -67,18 +180,19 @@ func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profil
 		},
 	}
 
-	body, err := json.Marshal(reqBody)
+	bodyJSON, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling queryData request: %w", err)
 	}
 
-	apiURL := fmt.Sprintf(queryDataURL, projectID, location)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
+	apiURL := fmt.Sprintf(queryDataURLFmt, profile.Project, location)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, fmt.Errorf("creating queryData request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-server-timeout", "300")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -95,7 +209,6 @@ func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profil
 		return nil, fmt.Errorf("reading queryData response: %w", err)
 	}
 
-	// Parse the documented QueryDataResponse.
 	var raw map[string]interface{}
 	if err := json.Unmarshal(respBody, &raw); err != nil {
 		return nil, fmt.Errorf("parsing queryData response: %w", err)
@@ -117,9 +230,6 @@ func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profil
 	if qr, ok := raw["queryResult"]; ok {
 		result.Results = qr
 	}
-	if agent != "" {
-		result.Agent = agent
-	}
 
 	return result, nil
 }
@@ -139,7 +249,7 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 	reqBody := map[string]interface{}{
 		"prompt": question,
 		"context": map[string]interface{}{
-			"datasourceReferences": buildDatasourceReferences(profile, ""),
+			"datasourceReferences": buildQueryDataDatasourceRef(profile),
 		},
 		"generationOptions": map[string]interface{}{
 			"generateQueryResult": true,
@@ -151,7 +261,7 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 		return nil, fmt.Errorf("marshaling queryData request: %w", err)
 	}
 
-	apiURL := fmt.Sprintf(queryDataURL, profile.Project, location)
+	apiURL := fmt.Sprintf(queryDataURLFmt, profile.Project, location)
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating queryData request: %w", err)
@@ -184,6 +294,8 @@ func (c *Client) AskQueryDataRaw(ctx context.Context, token string, profile *pro
 // CreateAgent creates a new BigQuery data agent via the Data Agents v1alpha API.
 // The API returns a long-running Operation; we surface the operation name.
 // Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations.dataAgents/create
+// CreateAgent creates a data agent synchronously via :createSync.
+// Uses publishedContext (not stagingContext) matching the Rust implementation.
 func (c *Client) CreateAgent(ctx context.Context, token, projectID, location string, opts CreateAgentOpts) (*CreateAgentResult, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("project ID is required")
@@ -192,24 +304,27 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 		location = "us"
 	}
 
-	// Build the DataAgent request body with the documented nested structure.
-	tableRefs := make([]BigQueryTableReference, 0, len(opts.Tables)+len(opts.Views))
-	for _, ref := range append(opts.Tables, opts.Views...) {
-		tableRefs = append(tableRefs, parseBQTableRef(ref))
+	tableRefs := buildBQTableRefs(strings.Join(opts.Tables, ","))
+	for _, v := range opts.Views {
+		tableRefs = append(tableRefs, parseBQTableRefMap(v))
 	}
 
-	agentBody := DataAgent{
-		DisplayName: opts.AgentID,
-		DataAnalyticsAgent: &DataAnalyticsAgent{
-			StagingContext: &AgentContext{
-				SystemInstruction: opts.Instructions,
-				DatasourceReferences: &DatasourceReferences{
-					BQ: &BigQueryTableReferences{
-						TableReferences: tableRefs,
-					},
-				},
-				ExampleQueries: opts.ExampleQueries,
+	publishedContext := map[string]interface{}{
+		"datasourceReferences": map[string]interface{}{
+			"bq": map[string]interface{}{
+				"tableReferences": tableRefs,
 			},
+		},
+		"exampleQueries": opts.ExampleQueries,
+	}
+	if opts.Instructions != "" {
+		publishedContext["systemInstruction"] = opts.Instructions
+	}
+
+	agentBody := map[string]interface{}{
+		"displayName": opts.DisplayName,
+		"dataAnalyticsAgent": map[string]interface{}{
+			"publishedContext": publishedContext,
 		},
 	}
 
@@ -218,11 +333,7 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 		return nil, fmt.Errorf("marshaling create-agent request: %w", err)
 	}
 
-	// dataAgentId is a query parameter, not in the body.
-	apiURL := fmt.Sprintf(dataAgentsBaseURL, projectID, location)
-	if opts.AgentID != "" {
-		apiURL += "?dataAgentId=" + opts.AgentID
-	}
+	apiURL := fmt.Sprintf(createAgentSyncFmt, projectID, location, opts.AgentID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
@@ -230,6 +341,7 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-server-timeout", "300")
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -241,23 +353,23 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 		return nil, readAPIError(resp)
 	}
 
-	// Response is a long-running Operation.
+	// :createSync returns the DataAgent directly (not an Operation).
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading create-agent response: %w", err)
 	}
 
-	var operation map[string]interface{}
-	if err := json.Unmarshal(respBody, &operation); err != nil {
+	var agent map[string]interface{}
+	if err := json.Unmarshal(respBody, &agent); err != nil {
 		return nil, fmt.Errorf("parsing create-agent response: %w", err)
 	}
 
-	opName, _ := operation["name"].(string)
+	name, _ := agent["name"].(string)
 
 	return &CreateAgentResult{
-		OperationName: opName,
+		OperationName: name,
 		AgentID:       opts.AgentID,
-		Status:        "operation_started",
+		Status:        "created",
 	}, nil
 }
 
@@ -271,7 +383,7 @@ func (c *Client) ListAgents(ctx context.Context, token, projectID, location stri
 		location = "us"
 	}
 
-	baseURL := fmt.Sprintf(dataAgentsBaseURL, projectID, location)
+	baseURL := fmt.Sprintf(dataAgentsURLFmt, projectID, location)
 	var allAgents []AgentSummary
 	pageToken := ""
 
@@ -351,6 +463,8 @@ func extractErrorMessage(body []byte, statusCode int) string {
 // There is no standalone addVerifiedQuery method in the API; verified queries
 // (exampleQueries) are fields on the DataAgent resource updated via patch.
 // Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations.dataAgents
+// AddVerifiedQuery appends example queries to an existing agent via GET + :updateSync.
+// Uses publishedContext (matching Rust implementation).
 func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, location string, opts PatchAgentOpts) (*AddVerifiedQueryResult, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("project ID is required")
@@ -359,9 +473,9 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, locatio
 		location = "us"
 	}
 
-	// First GET the existing agent to read current exampleQueries.
+	// 1. GET the existing agent to read current exampleQueries.
 	agentResourceName := fmt.Sprintf("projects/%s/locations/%s/dataAgents/%s", projectID, location, opts.AgentName)
-	getURL := fmt.Sprintf(dataAgentURL, agentResourceName)
+	getURL := fmt.Sprintf(dataAgentURLFmt, agentResourceName)
 
 	getReq, err := http.NewRequestWithContext(ctx, "GET", getURL, nil)
 	if err != nil {
@@ -385,42 +499,57 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, locatio
 		return nil, fmt.Errorf("reading get response: %w", err)
 	}
 
-	var existing DataAgent
-	if err := json.Unmarshal(getBody, &existing); err != nil {
+	// 2. Parse existing agent and append new exampleQueries to publishedContext.
+	var agent map[string]interface{}
+	if err := json.Unmarshal(getBody, &agent); err != nil {
 		return nil, fmt.Errorf("parsing existing agent: %w", err)
 	}
 
-	// Append new example queries to staging context.
-	if existing.DataAnalyticsAgent == nil {
-		existing.DataAnalyticsAgent = &DataAnalyticsAgent{}
+	daa, _ := agent["dataAnalyticsAgent"].(map[string]interface{})
+	if daa == nil {
+		daa = map[string]interface{}{}
 	}
-	if existing.DataAnalyticsAgent.StagingContext == nil {
-		existing.DataAnalyticsAgent.StagingContext = &AgentContext{}
+	published, _ := daa["publishedContext"].(map[string]interface{})
+	if published == nil {
+		published = map[string]interface{}{}
 	}
-	existing.DataAnalyticsAgent.StagingContext.ExampleQueries = append(
-		existing.DataAnalyticsAgent.StagingContext.ExampleQueries,
-		opts.ExampleQueries...,
-	)
 
-	// PATCH the agent with updated exampleQueries.
-	patchBody, err := json.Marshal(existing)
+	existingQueries, _ := published["exampleQueries"].([]interface{})
+	for _, eq := range opts.ExampleQueries {
+		existingQueries = append(existingQueries, map[string]interface{}{
+			"naturalLanguageQuestion": eq.NaturalLanguageQuestion,
+			"sqlQuery":               eq.SQLQuery,
+		})
+	}
+	published["exampleQueries"] = existingQueries
+
+	// 3. :updateSync with the updated publishedContext.
+	updateBody := map[string]interface{}{
+		"name": agentResourceName,
+		"dataAnalyticsAgent": map[string]interface{}{
+			"publishedContext": published,
+		},
+	}
+
+	patchBody, err := json.Marshal(updateBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling patch request: %w", err)
+		return nil, fmt.Errorf("marshaling update request: %w", err)
 	}
 
-	patchURL := fmt.Sprintf(dataAgentURL, agentResourceName) +
-		"?updateMask=dataAnalyticsAgent.stagingContext.exampleQueries"
+	updateURL := fmt.Sprintf(updateAgentSyncFmt, agentResourceName,
+		"dataAnalyticsAgent.publishedContext.exampleQueries")
 
-	patchReq, err := http.NewRequestWithContext(ctx, "PATCH", patchURL, bytes.NewReader(patchBody))
+	patchReq, err := http.NewRequestWithContext(ctx, "PATCH", updateURL, bytes.NewReader(patchBody))
 	if err != nil {
-		return nil, fmt.Errorf("creating patch request: %w", err)
+		return nil, fmt.Errorf("creating update request: %w", err)
 	}
 	patchReq.Header.Set("Authorization", "Bearer "+token)
 	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.Header.Set("x-server-timeout", "300")
 
 	patchResp, err := c.HTTPClient.Do(patchReq)
 	if err != nil {
-		return nil, fmt.Errorf("patch agent failed: %w", err)
+		return nil, fmt.Errorf("updateSync agent failed: %w", err)
 	}
 	defer patchResp.Body.Close()
 
@@ -428,30 +557,13 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, locatio
 		return nil, readAPIError(patchResp)
 	}
 
-	// PATCH returns a long-running Operation, not the updated agent.
-	patchRespBody, err := io.ReadAll(patchResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading patch response: %w", err)
-	}
-
-	var patchOp map[string]interface{}
-	if err := json.Unmarshal(patchRespBody, &patchOp); err != nil {
-		return nil, fmt.Errorf("parsing patch response: %w", err)
-	}
-
-	opName, _ := patchOp["name"].(string)
-	done, _ := patchOp["done"].(bool)
-
-	status := "operation_started"
-	if done {
-		status = "completed"
-	}
+	total := len(existingQueries)
 
 	return &AddVerifiedQueryResult{
-		Agent:         opts.AgentName,
-		QueriesAdded:  len(opts.ExampleQueries),
-		OperationName: opName,
-		Status:        status,
+		Agent:              opts.AgentName,
+		QueriesAdded:       len(opts.ExampleQueries),
+		TotalVerifiedQueries: total,
+		Status:             "added",
 	}, nil
 }
 
@@ -495,69 +607,153 @@ func parseBQTableRef(ref string) BigQueryTableReference {
 
 // buildDatasourceReferences constructs the correct nested datasource
 // reference for the queryData API based on the profile's source type.
-func buildDatasourceReferences(profile *profiles.Profile, inlineTables string) map[string]interface{} {
-	if profile == nil {
-		return nil
+// buildBQTableRefs parses a comma-separated table list into reference maps.
+func buildBQTableRefs(tables string) []map[string]string {
+	var refs []map[string]string
+	for _, ref := range strings.Split(tables, ",") {
+		trimmed := strings.TrimSpace(ref)
+		if trimmed != "" {
+			refs = append(refs, parseBQTableRefMap(trimmed))
+		}
+	}
+	return refs
+}
+
+// buildLookerExploreRefs builds explore reference objects from a profile.
+func buildLookerExploreRefs(profile *profiles.Profile) []map[string]interface{} {
+	instanceURL := profile.LookerInstanceURL
+	explores := profile.LookerExplores
+	var refs []map[string]interface{}
+	for _, exp := range explores {
+		parts := strings.SplitN(exp, "/", 2)
+		if len(parts) == 2 {
+			ref := map[string]interface{}{
+				"lookerInstanceUri": instanceURL,
+				"lookmlModel":      parts[0],
+				"explore":          parts[1],
+			}
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// buildQueryDataDatasourceRef builds the datasourceReferences for the
+// queryData endpoint, matching the Rust implementation's per-source structures.
+func buildQueryDataDatasourceRef(profile *profiles.Profile) map[string]interface{} {
+	location := profile.Location
+	if location == "" {
+		location = "us"
 	}
 
 	switch profile.SourceType {
-	case profiles.BigQuery:
-		var tableRefs []map[string]string
-		if inlineTables != "" {
-			for _, ref := range strings.Split(inlineTables, ",") {
-				tableRefs = append(tableRefs, parseBQTableRefMap(strings.TrimSpace(ref)))
-			}
-		}
-		return map[string]interface{}{
-			"bq": map[string]interface{}{
-				"tableReferences": tableRefs,
-			},
-		}
-
-	case profiles.Spanner:
-		return map[string]interface{}{
-			"spannerReference": map[string]interface{}{
-				"projectId":  profile.Project,
-				"instanceId": profile.InstanceID,
-				"databaseId": profile.DatabaseID,
-			},
-		}
-
 	case profiles.AlloyDB:
-		return map[string]interface{}{
-			"alloydb": map[string]interface{}{
+		inner := map[string]interface{}{
+			"databaseReference": map[string]interface{}{
 				"projectId":  profile.Project,
-				"locationId": profile.Location,
+				"region":     location,
 				"clusterId":  profile.ClusterID,
 				"instanceId": profile.InstanceID,
 				"databaseId": profile.DatabaseID,
 			},
 		}
+		if profile.ContextSetID != "" {
+			inner["agentContextReference"] = map[string]interface{}{
+				"contextSetId": fmt.Sprintf("projects/%s/locations/%s/contextSets/%s",
+					profile.Project, location, profile.ContextSetID),
+			}
+		}
+		return map[string]interface{}{"alloydb": inner}
 
-	case profiles.CloudSQL:
-		return map[string]interface{}{
-			"cloudSqlReference": map[string]interface{}{
+	case profiles.Spanner:
+		inner := map[string]interface{}{
+			"databaseReference": map[string]interface{}{
+				"engine":     "GOOGLE_SQL",
 				"projectId":  profile.Project,
 				"instanceId": profile.InstanceID,
 				"databaseId": profile.DatabaseID,
 			},
 		}
+		if profile.ContextSetID != "" {
+			inner["agentContextReference"] = map[string]interface{}{
+				"contextSetId": fmt.Sprintf("projects/%s/locations/%s/contextSets/%s",
+					profile.Project, location, profile.ContextSetID),
+			}
+		}
+		return map[string]interface{}{"spannerReference": inner}
 
-	case profiles.Looker:
-		ref := map[string]interface{}{}
-		if profile.LookerInstanceURL != "" {
-			ref["instanceUri"] = profile.LookerInstanceURL
+	case profiles.CloudSQL:
+		engine := "POSTGRESQL"
+		if profile.DBType == "mysql" {
+			engine = "MYSQL"
 		}
-		if len(profile.LookerExplores) > 0 {
-			ref["exploreReferences"] = profile.LookerExplores
+		inner := map[string]interface{}{
+			"databaseReference": map[string]interface{}{
+				"engine":     engine,
+				"projectId":  profile.Project,
+				"region":     location,
+				"instanceId": profile.InstanceID,
+				"databaseId": profile.DatabaseID,
+			},
 		}
-		return map[string]interface{}{
-			"looker": ref,
+		if profile.ContextSetID != "" {
+			inner["agentContextReference"] = map[string]interface{}{
+				"contextSetId": fmt.Sprintf("projects/%s/locations/%s/contextSets/%s",
+					profile.Project, location, profile.ContextSetID),
+			}
 		}
+		return map[string]interface{}{"cloudSqlReference": inner}
 
 	default:
 		return nil
 	}
+}
+
+// parseChatResponse parses the streaming chat response (JSON array of messages)
+// and extracts the CA answer.
+func parseChatResponse(body []byte, question, agent string) (*AskResult, error) {
+	// The chat API returns a JSON array or newline-delimited JSON messages.
+	var messages []map[string]interface{}
+
+	trimmed := strings.TrimSpace(string(body))
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal([]byte(trimmed), &messages); err != nil {
+			return nil, fmt.Errorf("parsing chat response: %w", err)
+		}
+	} else {
+		// Newline-delimited JSON.
+		for _, line := range strings.Split(trimmed, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var msg map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				continue
+			}
+			messages = append(messages, msg)
+		}
+	}
+
+	result := &AskResult{
+		Question: question,
+		Agent:    agent,
+	}
+
+	// Extract SQL, results, and explanation from the streaming messages.
+	for _, msg := range messages {
+		if sql, ok := msg["generatedQuery"].(string); ok && sql != "" {
+			result.SQL = sql
+		}
+		if explanation, ok := msg["textContent"].(string); ok && explanation != "" {
+			result.Explanation = explanation
+		}
+		if qr, ok := msg["queryResult"]; ok {
+			result.Results = qr
+		}
+	}
+
+	return result, nil
 }
 
 func parseBQTableRefMap(ref string) map[string]string {

@@ -98,13 +98,11 @@ type PatchAgentOpts struct {
 }
 
 // AddVerifiedQueryResult is the output of ca add-verified-query.
-// The PATCH API returns a long-running Operation; status reflects
-// whether the operation completed synchronously or is still running.
 type AddVerifiedQueryResult struct {
-	Agent         string `json:"agent"`
-	QueriesAdded  int    `json:"queries_added"`
-	OperationName string `json:"operation_name,omitempty"`
-	Status        string `json:"status"`
+	Agent                string `json:"agent"`
+	QueriesAdded         int    `json:"queries_added"`
+	TotalVerifiedQueries int    `json:"total_verified_queries"`
+	Status               string `json:"status"`
 }
 
 // AskResult is the unified output for ca ask across all source types.
