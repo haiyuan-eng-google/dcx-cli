@@ -180,25 +180,26 @@ func (a *App) caCreateAgentCmd() *cobra.Command {
 				return nil
 			}
 
-			req := ca.CreateAgentRequest{
-				Name:         name,
+			opts := ca.CreateAgentOpts{
+				AgentID:      name,
+				DisplayName:  name,
 				Tables:       splitCSV(tables),
 				Instructions: instructions,
 			}
 			if views != "" {
-				req.Views = splitCSV(views)
+				opts.Views = splitCSV(views)
 			}
 			if verifiedQueriesPath != "" {
-				vqs, err := loadVerifiedQueries(verifiedQueriesPath)
+				eqs, err := loadExampleQueries(verifiedQueriesPath)
 				if err != nil {
 					dcxerrors.Emit(dcxerrors.InvalidConfig, fmt.Sprintf("loading verified queries: %v", err), "")
 					return nil
 				}
-				req.VerifiedQueries = vqs
+				opts.ExampleQueries = eqs
 			}
 
 			client := ca.NewClient(nil)
-			result, err := client.CreateAgent(ctx, tok.AccessToken, projectID, a.Opts.Location, req)
+			result, err := client.CreateAgent(ctx, tok.AccessToken, projectID, a.Opts.Location, opts)
 			if err != nil {
 				dcxerrors.Emit(dcxerrors.APIError, err.Error(), "")
 				return nil
@@ -303,10 +304,11 @@ func (a *App) caAddVerifiedQueryCmd() *cobra.Command {
 			}
 
 			client := ca.NewClient(nil)
-			result, err := client.AddVerifiedQuery(ctx, tok.AccessToken, projectID, a.Opts.Location, ca.AddVerifiedQueryRequest{
-				Agent:    agentName,
-				Question: question,
-				Query:    query,
+			result, err := client.AddVerifiedQuery(ctx, tok.AccessToken, projectID, a.Opts.Location, ca.PatchAgentOpts{
+				AgentName: agentName,
+				ExampleQueries: []ca.ExampleQuery{
+					{NaturalLanguageQuestion: question, SQLQuery: query},
+				},
 			})
 			if err != nil {
 				dcxerrors.Emit(dcxerrors.APIError, err.Error(), "")
@@ -336,15 +338,17 @@ func splitCSV(s string) []string {
 	return result
 }
 
-// loadVerifiedQueries reads a YAML file containing verified queries.
-func loadVerifiedQueries(path string) ([]ca.VerifiedQuery, error) {
+// loadExampleQueries reads a YAML file containing verified queries.
+// The YAML uses the user-facing "verified_queries" key with "question"
+// and "query" fields, which map to ExampleQuery's YAML tags.
+func loadExampleQueries(path string) ([]ca.ExampleQuery, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
 	var doc struct {
-		VerifiedQueries []ca.VerifiedQuery `yaml:"verified_queries"`
+		VerifiedQueries []ca.ExampleQuery `yaml:"verified_queries"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)

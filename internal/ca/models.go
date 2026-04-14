@@ -44,27 +44,74 @@ type QueryDataResponse struct {
 	SourceType  string      `json:"source_type"`
 }
 
-// VerifiedQuery is a pre-authored question/SQL pair that improves agent accuracy.
-type VerifiedQuery struct {
-	Question string `json:"question" yaml:"question"`
-	Query    string `json:"query" yaml:"query"`
+// ExampleQuery is a verified question/SQL pair (called "exampleQueries"
+// in the Data Agents API) that improves agent accuracy.
+// YAML tag supports the user-facing "verified_queries" naming in YAML files.
+type ExampleQuery struct {
+	NaturalLanguageQuestion string `json:"naturalLanguageQuestion" yaml:"question"`
+	SQLQuery                string `json:"sqlQuery" yaml:"query"`
 }
 
-// CreateAgentRequest is the request body for creating a data agent.
-type CreateAgentRequest struct {
-	Name             string          `json:"name"`
-	Tables           []string        `json:"tables"`
-	Views            []string        `json:"views,omitempty"`
-	VerifiedQueries  []VerifiedQuery `json:"verified_queries,omitempty"`
-	Instructions     string          `json:"instructions,omitempty"`
+// BigQueryTableReference identifies a BigQuery table for agent context.
+type BigQueryTableReference struct {
+	ProjectID string `json:"projectId"`
+	DatasetID string `json:"datasetId"`
+	TableID   string `json:"tableId"`
 }
 
-// AgentSummary is the compact representation for list-agents output.
+// BigQueryTableReferences wraps table references for the datasource field.
+type BigQueryTableReferences struct {
+	TableReferences []BigQueryTableReference `json:"tableReferences"`
+}
+
+// DatasourceReferences is a union type; BigQuery is the only variant
+// supported for create-agent.
+type DatasourceReferences struct {
+	BQ *BigQueryTableReferences `json:"bq,omitempty"`
+}
+
+// AgentContext holds the data context for a DataAnalyticsAgent.
+// This maps to stagingContext / publishedContext in the API.
+type AgentContext struct {
+	SystemInstruction    string                `json:"systemInstruction,omitempty"`
+	DatasourceReferences *DatasourceReferences `json:"datasourceReferences,omitempty"`
+	ExampleQueries       []ExampleQuery        `json:"exampleQueries,omitempty"`
+}
+
+// DataAnalyticsAgent is the typed agent payload nested inside DataAgent.
+type DataAnalyticsAgent struct {
+	StagingContext   *AgentContext `json:"stagingContext,omitempty"`
+	PublishedContext *AgentContext `json:"publishedContext,omitempty"`
+}
+
+// DataAgent is the top-level resource for the Data Agents management API.
+// Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations.dataAgents
+type DataAgent struct {
+	Name               string              `json:"name,omitempty"`
+	DisplayName        string              `json:"displayName,omitempty"`
+	Description        string              `json:"description,omitempty"`
+	DataAnalyticsAgent *DataAnalyticsAgent  `json:"dataAnalyticsAgent,omitempty"`
+	CreateTime         string              `json:"createTime,omitempty"`
+	UpdateTime         string              `json:"updateTime,omitempty"`
+}
+
+// CreateAgentOpts holds the user-facing options for ca create-agent.
+// These are mapped into the DataAgent API shape by the client.
+type CreateAgentOpts struct {
+	AgentID      string         // passed as ?dataAgentId= query param
+	DisplayName  string
+	Tables       []string       // "project.dataset.table" refs
+	Views        []string       // additional view refs (also as table refs)
+	ExampleQueries []ExampleQuery
+	Instructions string
+}
+
+// AgentSummary is the dcx output representation for a single agent.
 type AgentSummary struct {
-	Name            string   `json:"name"`
-	Tables          []string `json:"tables,omitempty"`
-	VerifiedQueries int      `json:"verified_queries_count,omitempty"`
-	CreateTime      string   `json:"create_time,omitempty"`
+	Name            string `json:"name"`
+	DisplayName     string `json:"display_name,omitempty"`
+	ExampleQueries  int    `json:"example_queries_count,omitempty"`
+	CreateTime      string `json:"create_time,omitempty"`
 }
 
 // AgentsListResult is the output of ca list-agents.
@@ -74,24 +121,25 @@ type AgentsListResult struct {
 }
 
 // CreateAgentResult is the output of ca create-agent.
+// The API returns a long-running Operation; we surface the operation name
+// and the agent name from the metadata.
 type CreateAgentResult struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	OperationName string `json:"operation_name"`
+	AgentID       string `json:"agent_id"`
+	Status        string `json:"status"`
 }
 
-// AddVerifiedQueryRequest is the request body for adding a verified query.
-type AddVerifiedQueryRequest struct {
-	Agent    string `json:"agent"`
-	Question string `json:"question"`
-	Query    string `json:"query"`
+// PatchAgentOpts holds options for patching an agent (used by add-verified-query).
+type PatchAgentOpts struct {
+	AgentName      string         // full resource name
+	ExampleQueries []ExampleQuery // queries to add
 }
 
 // AddVerifiedQueryResult is the output of ca add-verified-query.
 type AddVerifiedQueryResult struct {
-	Agent    string `json:"agent"`
-	Question string `json:"question"`
-	Status   string `json:"status"`
+	Agent         string `json:"agent"`
+	QueriesAdded  int    `json:"queries_added"`
+	Status        string `json:"status"`
 }
 
 // AskResult is the unified output for ca ask across all source types.
