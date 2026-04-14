@@ -15,7 +15,7 @@ dcx ca create-agent \
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--name` | Yes | Agent ID (alphanumeric, hyphens, underscores, dots) |
+| `--name` | Yes | Agent ID: lowercase letters, digits, hyphens; must start with a letter (`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`) |
 | `--tables` | Yes | Comma-separated fully qualified table refs |
 | `--views` | No | Comma-separated view refs as additional data sources |
 | `--verified-queries` | No | Path to verified queries YAML (defaults to bundled) |

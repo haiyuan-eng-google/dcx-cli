@@ -338,7 +338,7 @@ func (c *Client) CreateAgent(ctx context.Context, token, projectID, location str
 	}, nil
 }
 
-// ListAgents lists data agents in the given project via the Data Agents v1alpha API.
+// ListAgents lists all data agents in the given project, handling pagination.
 // Docs: https://docs.cloud.google.com/gemini/data-agents/reference/rest/v1alpha/projects.locations.dataAgents/list
 func (c *Client) ListAgents(ctx context.Context, token, projectID, location string) (*AgentsListResult, error) {
 	if projectID == "" {
@@ -348,52 +348,80 @@ func (c *Client) ListAgents(ctx context.Context, token, projectID, location stri
 		location = "us"
 	}
 
-	apiURL := fmt.Sprintf(dataAgentsBaseURL, projectID, location)
+	baseURL := fmt.Sprintf(dataAgentsBaseURL, projectID, location)
+	var allAgents []AgentSummary
+	pageToken := ""
 
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	httpReq.Header.Set("Authorization", "Bearer "+token)
-	httpReq.Header.Set("Accept", "application/json")
+	for {
+		apiURL := baseURL
+		if pageToken != "" {
+			apiURL += "?pageToken=" + pageToken
+		}
 
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("list-agents API request failed: %w", err)
-	}
-	defer resp.Body.Close()
+		httpReq, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+		httpReq.Header.Set("Accept", "application/json")
 
-	if resp.StatusCode >= 400 {
-		return nil, readAPIError(resp)
-	}
+		resp, err := c.HTTPClient.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("list-agents API request failed: %w", err)
+		}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading list-agents response: %w", err)
-	}
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 
-	var raw map[string]interface{}
-	if err := json.Unmarshal(respBody, &raw); err != nil {
-		return nil, fmt.Errorf("parsing list-agents response: %w", err)
-	}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("list-agents: %s", extractErrorMessage(respBody, resp.StatusCode))
+		}
 
-	var agents []AgentSummary
-	if items, ok := raw["dataAgents"].([]interface{}); ok {
-		for _, item := range items {
-			if m, ok := item.(map[string]interface{}); ok {
-				agents = append(agents, parseAgentSummary(m))
+		if err != nil {
+			return nil, fmt.Errorf("reading list-agents response: %w", err)
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal(respBody, &raw); err != nil {
+			return nil, fmt.Errorf("parsing list-agents response: %w", err)
+		}
+
+		if items, ok := raw["dataAgents"].([]interface{}); ok {
+			for _, item := range items {
+				if m, ok := item.(map[string]interface{}); ok {
+					allAgents = append(allAgents, parseAgentSummary(m))
+				}
 			}
 		}
+
+		// Check for next page.
+		npt, _ := raw["nextPageToken"].(string)
+		if npt == "" {
+			break
+		}
+		pageToken = npt
 	}
 
-	if agents == nil {
-		agents = []AgentSummary{}
+	if allAgents == nil {
+		allAgents = []AgentSummary{}
 	}
 
 	return &AgentsListResult{
-		Items:  agents,
+		Items:  allAgents,
 		Source: "BigQuery",
 	}, nil
+}
+
+func extractErrorMessage(body []byte, statusCode int) string {
+	var apiErr struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
+		return apiErr.Error.Message
+	}
+	return fmt.Sprintf("API returned HTTP %d", statusCode)
 }
 
 // AddVerifiedQuery adds example queries to an existing data agent via PATCH.
@@ -477,10 +505,30 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, locatio
 		return nil, readAPIError(patchResp)
 	}
 
+	// PATCH returns a long-running Operation, not the updated agent.
+	patchRespBody, err := io.ReadAll(patchResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading patch response: %w", err)
+	}
+
+	var patchOp map[string]interface{}
+	if err := json.Unmarshal(patchRespBody, &patchOp); err != nil {
+		return nil, fmt.Errorf("parsing patch response: %w", err)
+	}
+
+	opName, _ := patchOp["name"].(string)
+	done, _ := patchOp["done"].(bool)
+
+	status := "operation_started"
+	if done {
+		status = "completed"
+	}
+
 	return &AddVerifiedQueryResult{
-		Agent:        opts.AgentName,
-		QueriesAdded: len(opts.ExampleQueries),
-		Status:       "added",
+		Agent:         opts.AgentName,
+		QueriesAdded:  len(opts.ExampleQueries),
+		OperationName: opName,
+		Status:        status,
 	}, nil
 }
 

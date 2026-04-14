@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/auth"
@@ -43,7 +44,7 @@ func (a *App) addCACommands() {
 		"ca create-agent", "ca",
 		"Create a BigQuery data agent with table refs and optional verified queries",
 		[]contracts.FlagContract{
-			{Name: "name", Type: "string", Description: "Agent name (alphanumeric, hyphens, underscores, dots)", Required: true},
+			{Name: "name", Type: "string", Description: "Agent ID: lowercase letters, digits, hyphens; must start with a letter (regex: ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$)", Required: true},
 			{Name: "tables", Type: "string", Description: "Comma-separated fully qualified table refs", Required: true},
 			{Name: "views", Type: "string", Description: "Comma-separated view refs as additional data sources"},
 			{Name: "verified-queries", Type: "string", Description: "Path to verified queries YAML file"},
@@ -151,6 +152,12 @@ func (a *App) caCreateAgentCmd() *cobra.Command {
 				dcxerrors.Emit(dcxerrors.MissingArgument, "required flag --name is missing", "")
 				return nil
 			}
+			if !isValidAgentID(name) {
+				dcxerrors.Emit(dcxerrors.InvalidIdentifier,
+					fmt.Sprintf("invalid agent ID %q: must match ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", name),
+					"Use lowercase letters, digits, and hyphens; must start with a letter")
+				return nil
+			}
 			if tables == "" {
 				dcxerrors.Emit(dcxerrors.MissingArgument, "required flag --tables is missing", "")
 				return nil
@@ -209,7 +216,7 @@ func (a *App) caCreateAgentCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "Agent name (required)")
+	cmd.Flags().StringVar(&name, "name", "", "Agent ID: lowercase, digits, hyphens; starts with letter (required)")
 	cmd.Flags().StringVar(&tables, "tables", "", "Comma-separated fully qualified table refs (required)")
 	cmd.Flags().StringVar(&views, "views", "", "Comma-separated view refs")
 	cmd.Flags().StringVar(&verifiedQueriesPath, "verified-queries", "", "Path to verified queries YAML file")
@@ -355,4 +362,12 @@ func loadExampleQueries(path string) ([]ca.ExampleQuery, error) {
 	}
 
 	return doc.VerifiedQueries, nil
+}
+
+// agentIDPattern matches the documented dataAgentId format.
+var agentIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// isValidAgentID checks if an agent ID matches the API-documented format.
+func isValidAgentID(id string) bool {
+	return agentIDPattern.MatchString(id)
 }
