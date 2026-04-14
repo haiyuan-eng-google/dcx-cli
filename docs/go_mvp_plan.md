@@ -714,21 +714,26 @@ The right message is:
 
 > "Go MVP of dcx: BigQuery + Data Cloud source commands + CA ask + meta/MCP + CLI benchmark suite."
 
-## Immediate next steps
+## Implementation status
 
-1. Create `haiyuan-eng-google/dcx-cli` with `go mod init`
-2. Copy benchmark, skills, docs, and Discovery assets from `bqx-cli`
-3. Export Rust command contracts for all P0 commands into
-   `testdata/rust-snapshots/`
-4. Implement Go Phase 1 (core runtime + contract)
-5. Do not start Data Cloud services until the BigQuery benchmark core and
-   contract system are working end to end in the Go repo
+All 6 phases are complete. The Go MVP is functional with 35 commands
+across 9 domains, benchmarked at 5x faster than `bq`.
+
+| Phase | Status | PR |
+|-------|--------|-----|
+| Phase 1: Core runtime | Merged | #2 |
+| Phase 2: BigQuery P0 | Merged | #2 |
+| Phase 3: Data Cloud Discovery | Merged | #2 |
+| Phase 4: CA + QueryData + Looker | Merged | #3 |
+| Phase 5: MCP + skills | Merged | #2 |
+| Phase 6: Eval suite + CI | Merged | #4 |
+| Benchmark run + docs | Merged | #5 |
 
 ## Bottom line
 
-The Go MVP should not be "all of current `bqx-cli` in another language."
+The Go MVP is not "all of current `bqx-cli` in another language."
 
-It should be:
+It is:
 
 - BigQuery core (Discovery + static query)
 - Data Cloud source core (Discovery + QueryData helpers + Looker SDK)
