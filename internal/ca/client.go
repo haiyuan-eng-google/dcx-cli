@@ -710,9 +710,12 @@ func buildQueryDataDatasourceRef(profile *profiles.Profile) map[string]interface
 }
 
 // parseChatResponse parses the streaming chat response (JSON array of messages)
-// and extracts the CA answer.
+// and extracts the CA answer. The response is an array of objects like:
+//
+//	{"systemMessage": {"text": {"parts": [...], "textType": "FINAL_RESPONSE"}}}
+//	{"systemMessage": {"data": {"generatedSql": "SELECT ..."}}}
+//	{"systemMessage": {"data": {"result": {"data": [...], "schema": {...}}}}}
 func parseChatResponse(body []byte, question, agent string) (*AskResult, error) {
-	// The chat API returns a JSON array or newline-delimited JSON messages.
 	var messages []map[string]interface{}
 
 	trimmed := strings.TrimSpace(string(body))
@@ -721,10 +724,9 @@ func parseChatResponse(body []byte, question, agent string) (*AskResult, error) 
 			return nil, fmt.Errorf("parsing chat response: %w", err)
 		}
 	} else {
-		// Newline-delimited JSON.
 		for _, line := range strings.Split(trimmed, "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" {
+			if line == "" || line == "," {
 				continue
 			}
 			var msg map[string]interface{}
@@ -740,16 +742,38 @@ func parseChatResponse(body []byte, question, agent string) (*AskResult, error) 
 		Agent:    agent,
 	}
 
-	// Extract SQL, results, and explanation from the streaming messages.
 	for _, msg := range messages {
-		if sql, ok := msg["generatedQuery"].(string); ok && sql != "" {
-			result.SQL = sql
+		sm, ok := msg["systemMessage"].(map[string]interface{})
+		if !ok {
+			continue
 		}
-		if explanation, ok := msg["textContent"].(string); ok && explanation != "" {
-			result.Explanation = explanation
+
+		// Extract text messages (FINAL_RESPONSE).
+		if text, ok := sm["text"].(map[string]interface{}); ok {
+			textType, _ := text["textType"].(string)
+			if textType == "FINAL_RESPONSE" {
+				if parts, ok := text["parts"].([]interface{}); ok {
+					for _, p := range parts {
+						if s, ok := p.(string); ok {
+							if result.Explanation == "" {
+								result.Explanation = s
+							} else {
+								result.Explanation += "\n" + s
+							}
+						}
+					}
+				}
+			}
 		}
-		if qr, ok := msg["queryResult"]; ok {
-			result.Results = qr
+
+		// Extract data messages (generatedSql, result).
+		if data, ok := sm["data"].(map[string]interface{}); ok {
+			if sql, ok := data["generatedSql"].(string); ok {
+				result.SQL = sql
+			}
+			if qr, ok := data["result"]; ok {
+				result.Results = qr
+			}
 		}
 	}
 
