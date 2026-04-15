@@ -12,10 +12,17 @@ func BigQueryConfig() *ServiceConfig {
 			"datasets.get",
 			"tables.list",
 			"tables.get",
+			"jobs.list",
+			"jobs.get",
+			"models.list",
+			"models.get",
+			"routines.list",
+			"routines.get",
 		},
 		GlobalParamMappings: map[string]string{
 			"projectId": "project-id",
 			"datasetId": "dataset-id",
+			"location":  "location",
 		},
 	}
 }
@@ -52,6 +59,8 @@ func AlloyDBConfig() *ServiceConfig {
 			"clusters.get",
 			"instances.list",
 			"instances.get",
+			"backups.list",
+			"backups.get",
 		},
 		GlobalParamMappings: map[string]string{},
 	}
@@ -69,6 +78,8 @@ func CloudSQLConfig() *ServiceConfig {
 			"instances.get",
 			"databases.list",
 			"databases.get",
+			"flags.list",
+			"tiers.list",
 		},
 		GlobalParamMappings: map[string]string{
 			"project": "project-id",

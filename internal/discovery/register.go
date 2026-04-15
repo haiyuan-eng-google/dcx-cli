@@ -141,8 +141,8 @@ func registerOneCommand(
 		leafCmd.Flags().StringVar(val, flagName, "", flag.Description)
 	}
 
-	// Add pagination flags for list commands.
-	if cmd.Method.Action == "list" {
+	// Add pagination flags only for list commands whose API supports pagination.
+	if cmd.Method.Action == "list" && methodSupportsPagination(cmd) {
 		leafCmd.Flags().StringVar(&pageToken, "page-token", "", "Page token for pagination")
 		leafCmd.Flags().BoolVar(&pageAll, "page-all", false, "Fetch all pages")
 	}
@@ -159,7 +159,7 @@ func registerOneCommand(
 			Required:    flag.Required,
 		})
 	}
-	if cmd.Method.Action == "list" {
+	if cmd.Method.Action == "list" && methodSupportsPagination(cmd) {
 		contractFlags = append(contractFlags,
 			contracts.FlagContract{Name: "page-token", Type: "string", Description: "Page token for pagination"},
 			contracts.FlagContract{Name: "page-all", Type: "bool", Description: "Fetch all pages"},
@@ -174,6 +174,13 @@ func registerOneCommand(
 		false, // Discovery GET commands are not mutations
 		false, // No dry-run for Discovery commands
 	))
+}
+
+// methodSupportsPagination returns true if the API method has a pageToken
+// parameter, indicating it supports pagination.
+func methodSupportsPagination(cmd GeneratedCommand) bool {
+	_, ok := cmd.Method.Parameters["pageToken"]
+	return ok
 }
 
 // isCommandPathFlag checks if a flag name is a path parameter, checking both
