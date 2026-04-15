@@ -114,3 +114,26 @@ type AskResult struct {
 	Source      string      `json:"source,omitempty"`
 	Agent       string      `json:"agent,omitempty"`
 }
+
+// StreamEventType identifies the kind of streaming event from the chat API.
+type StreamEventType int
+
+const (
+	// EventThinking is an intermediate thinking/progress message.
+	EventThinking StreamEventType = iota
+	// EventAnswer is the final natural-language response.
+	EventAnswer
+	// EventSQL is the generated SQL query.
+	EventSQL
+	// EventResult is the query result data.
+	EventResult
+)
+
+// StreamEvent represents a single incremental event from the chat API.
+type StreamEvent struct {
+	Type StreamEventType
+	Text string // text content (thinking step, answer, or SQL)
+}
+
+// StreamCallback is called for each event during streaming chat responses.
+type StreamCallback func(event StreamEvent)

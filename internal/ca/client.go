@@ -1,6 +1,7 @@
 package ca
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -48,15 +49,24 @@ func NewClient(httpClient *http.Client) *Client {
 // Spanner/AlloyDB/CloudSQL use :queryData (NL-to-SQL).
 // This matches the working Rust implementation.
 func (c *Client) Ask(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
+	return c.AskStream(ctx, token, profile, question, agent, tables, nil)
+}
+
+// AskStream is like Ask but accepts an optional StreamCallback that is called
+// for each message as it arrives from the chat API. This enables real-time
+// display of thinking steps and the final answer. If cb is nil, behaves
+// identically to Ask. QueryData sources ignore the callback.
+func (c *Client) AskStream(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string, cb StreamCallback) (*AskResult, error) {
 	if profile != nil && profile.IsQueryDataSource() {
 		return c.askQueryData(ctx, token, profile, question)
 	}
-	return c.askChat(ctx, token, profile, question, agent, tables)
+	return c.askChat(ctx, token, profile, question, agent, tables, cb)
 }
 
 // askChat sends a question to the :chat endpoint (BigQuery/Looker/Studio).
 // Uses messages + userMessage + inlineContext structure.
-func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string) (*AskResult, error) {
+// If cb is non-nil, each message is streamed to the callback as it arrives.
+func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Profile, question, agent, tables string, cb StreamCallback) (*AskResult, error) {
 	projectID := ""
 	location := "us"
 	if profile != nil {
@@ -136,13 +146,8 @@ func (c *Client) askChat(ctx context.Context, token string, profile *profiles.Pr
 		return nil, readAPIError(resp)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading chat response: %w", err)
-	}
-
-	// Parse streaming response (JSON array of messages).
-	result, err := parseChatResponse(respBody, question, agent)
+	// Parse the streaming response, invoking cb for each message if provided.
+	result, err := parseStreamingChat(resp.Body, question, agent, cb)
 	if err != nil {
 		return nil, err
 	}
@@ -698,6 +703,164 @@ func buildQueryDataDatasourceRef(profile *profiles.Profile) map[string]interface
 	default:
 		return nil
 	}
+}
+
+// parseStreamingChat reads the chat response body and dispatches each message
+// to the callback as it arrives from the network. Handles both wire formats:
+//   - JSON array: streamed incrementally via json.NewDecoder (common case)
+//   - Newline-delimited: read line by line from a bufio.Scanner (fallback)
+//
+// The complete AskResult is returned at the end regardless of format.
+func parseStreamingChat(body io.Reader, question, agent string, cb StreamCallback) (*AskResult, error) {
+	// Peek at the first non-whitespace byte to detect the wire format
+	// without consuming the stream.
+	br := bufio.NewReader(body)
+	firstByte, err := peekNonSpace(br)
+	if err != nil {
+		return nil, fmt.Errorf("reading chat response: %w", err)
+	}
+
+	var messages []map[string]interface{}
+
+	if firstByte == '[' {
+		// JSON array — stream directly from the response body.
+		decoder := json.NewDecoder(br)
+
+		// Consume opening '['.
+		if _, err := decoder.Token(); err != nil {
+			return nil, fmt.Errorf("parsing chat response array: %w", err)
+		}
+		for decoder.More() {
+			var msg map[string]interface{}
+			if err := decoder.Decode(&msg); err != nil {
+				return nil, fmt.Errorf("parsing chat message: %w", err)
+			}
+			messages = append(messages, msg)
+			dispatchStreamEvent(msg, cb)
+		}
+	} else {
+		// Newline-delimited — read line by line from the response body.
+		scanner := bufio.NewScanner(br)
+		scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || line == "," {
+				continue
+			}
+			var msg map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				continue // skip unparseable lines
+			}
+			messages = append(messages, msg)
+			dispatchStreamEvent(msg, cb)
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("reading chat response lines: %w", err)
+		}
+	}
+
+	return buildAskResult(messages, question, agent), nil
+}
+
+// peekNonSpace reads ahead in a bufio.Reader until a non-whitespace byte
+// is found, returning that byte without consuming it.
+func peekNonSpace(br *bufio.Reader) (byte, error) {
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		if b != ' ' && b != '\t' && b != '\n' && b != '\r' {
+			if err := br.UnreadByte(); err != nil {
+				return 0, err
+			}
+			return b, nil
+		}
+	}
+}
+
+// dispatchStreamEvent sends a single message to the callback if non-nil.
+func dispatchStreamEvent(msg map[string]interface{}, cb StreamCallback) {
+	if cb == nil {
+		return
+	}
+	sm, ok := msg["systemMessage"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	if text, ok := sm["text"].(map[string]interface{}); ok {
+		textType, _ := text["textType"].(string)
+		parts := extractTextParts(text)
+		if len(parts) == 0 {
+			return
+		}
+		switch textType {
+		case "FINAL_RESPONSE":
+			cb(StreamEvent{Type: EventAnswer, Text: strings.Join(parts, "\n")})
+		default:
+			cb(StreamEvent{Type: EventThinking, Text: parts[0]})
+		}
+	}
+
+	if data, ok := sm["data"].(map[string]interface{}); ok {
+		if sql, ok := data["generatedSql"].(string); ok {
+			cb(StreamEvent{Type: EventSQL, Text: sql})
+		}
+		if _, ok := data["result"]; ok {
+			cb(StreamEvent{Type: EventResult})
+		}
+	}
+}
+
+// buildAskResult extracts the final answer from a list of parsed messages.
+func buildAskResult(messages []map[string]interface{}, question, agent string) *AskResult {
+	result := &AskResult{
+		Question: question,
+		Agent:    agent,
+	}
+	for _, msg := range messages {
+		sm, ok := msg["systemMessage"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if text, ok := sm["text"].(map[string]interface{}); ok {
+			textType, _ := text["textType"].(string)
+			if textType == "FINAL_RESPONSE" {
+				for _, s := range extractTextParts(text) {
+					if result.Explanation == "" {
+						result.Explanation = s
+					} else {
+						result.Explanation += "\n" + s
+					}
+				}
+			}
+		}
+		if data, ok := sm["data"].(map[string]interface{}); ok {
+			if sql, ok := data["generatedSql"].(string); ok {
+				result.SQL = sql
+			}
+			if qr, ok := data["result"]; ok {
+				result.Results = qr
+			}
+		}
+	}
+	return result
+}
+
+// extractTextParts extracts string parts from a text message.
+func extractTextParts(text map[string]interface{}) []string {
+	parts, ok := text["parts"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, p := range parts {
+		if s, ok := p.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // parseChatResponse parses the streaming chat response (JSON array of messages)

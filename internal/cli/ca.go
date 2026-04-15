@@ -123,7 +123,21 @@ func (a *App) caAskCmd() *cobra.Command {
 			}
 
 			client := ca.NewClient(nil)
-			result, err := client.Ask(ctx, tok.AccessToken, profile, question, agent, tables)
+
+			// Stream thinking steps to stderr for text format.
+			var cb ca.StreamCallback
+			if format == output.Text {
+				cb = func(event ca.StreamEvent) {
+					switch event.Type {
+					case ca.EventThinking:
+						fmt.Fprintf(os.Stderr, "\033[2m%s\033[0m\n", event.Text)
+					case ca.EventSQL:
+						fmt.Fprintf(os.Stderr, "\033[2mSQL: %s\033[0m\n", truncateSQL(event.Text, 120))
+					}
+				}
+			}
+
+			result, err := client.AskStream(ctx, tok.AccessToken, profile, question, agent, tables, cb)
 			if err != nil {
 				code := dcxerrors.APIError
 				dcxerrors.Emit(code, err.Error(), "")
@@ -370,4 +384,13 @@ var agentIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 // isValidAgentID checks if an agent ID matches the API-documented format.
 func isValidAgentID(id string) bool {
 	return agentIDPattern.MatchString(id)
+}
+
+// truncateSQL shortens a SQL string for display, collapsing whitespace.
+func truncateSQL(sql string, maxLen int) string {
+	s := strings.Join(strings.Fields(sql), " ")
+	if len(s) > maxLen {
+		return s[:maxLen-3] + "..."
+	}
+	return s
 }
