@@ -71,7 +71,7 @@ All commands support `--format json|json-minified|table|text`. Default is `json`
 
 ## Known Limitations
 
-- All source commands are read-only (no create/update/delete)
+- BigQuery datasets and tables support insert/delete; all other source commands are read-only
 - Schema describe uses CA QueryData — requires a valid profile
 - AlloyDB `--location` defaults to `-` (all locations), not `US`
 - Looker content commands use per-instance API, admin commands use GCP API

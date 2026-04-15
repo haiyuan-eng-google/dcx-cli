@@ -85,6 +85,7 @@ func registerOneCommand(
 
 	// Build command-specific flags storage.
 	flagValues := make(map[string]*string, len(cmd.CommandFlags))
+	boolFlagValues := make(map[string]*bool)
 	pageToken := ""
 	pageAll := false
 	bodyFlag := ""
@@ -117,6 +118,11 @@ func registerOneCommand(
 					}
 				}
 			}
+			for name, val := range boolFlagValues {
+				if *val {
+					queryParams[name] = "true"
+				}
+			}
 			if pageToken != "" {
 				queryParams["pageToken"] = pageToken
 			}
@@ -143,12 +149,18 @@ func registerOneCommand(
 		},
 	}
 
-	// Register command-specific flags.
+	// Register command-specific flags with correct types.
 	for _, flag := range cmd.CommandFlags {
-		val := new(string)
-		flagValues[flag.Name] = val
 		flagName := camelToKebab(flag.Name)
-		leafCmd.Flags().StringVar(val, flagName, "", flag.Description)
+		if flag.Type == "boolean" {
+			val := new(bool)
+			boolFlagValues[flag.Name] = val
+			leafCmd.Flags().BoolVar(val, flagName, false, flag.Description)
+		} else {
+			val := new(string)
+			flagValues[flag.Name] = val
+			leafCmd.Flags().StringVar(val, flagName, "", flag.Description)
+		}
 	}
 
 	// Add pagination flags only for list commands whose API supports pagination.
