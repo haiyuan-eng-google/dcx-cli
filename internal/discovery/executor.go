@@ -76,7 +76,7 @@ func (e *Executor) Execute(
 	}
 
 	// 5. Build and execute request.
-	req, err := BuildRequest(cmd, pathParams, queryParams, tok.AccessToken)
+	req, err := BuildRequest(cmd, pathParams, queryParams, tok.AccessToken, nil)
 	if err != nil {
 		dcxerrors.Emit(dcxerrors.Internal, fmt.Sprintf("building request: %v", err), "")
 		return nil
@@ -137,7 +137,7 @@ func (e *Executor) executePageAll(
 			params["pageToken"] = pageToken
 		}
 
-		req, err := BuildRequest(cmd, pathParams, params, token)
+		req, err := BuildRequest(cmd, pathParams, params, token, nil)
 		if err != nil {
 			dcxerrors.Emit(dcxerrors.Internal, fmt.Sprintf("building request: %v", err), "")
 			return nil
@@ -252,6 +252,14 @@ func sourceName(domain string) string {
 	default:
 		return strings.Title(domain)
 	}
+}
+
+func readResponseBody(resp *http.Response) ([]byte, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	return body, nil
 }
 
 func handleErrorResponse(resp *http.Response) error {

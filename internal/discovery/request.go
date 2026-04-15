@@ -2,13 +2,15 @@ package discovery
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 )
 
 // BuildRequest constructs an HTTP request for a Discovery API method.
-func BuildRequest(cmd GeneratedCommand, pathParams map[string]string, queryParams map[string]string, token string) (*http.Request, error) {
+// body may be nil for methods that don't accept a request body (GET, DELETE).
+func BuildRequest(cmd GeneratedCommand, pathParams map[string]string, queryParams map[string]string, token string, body io.Reader) (*http.Request, error) {
 	// Choose path template.
 	pathTemplate := cmd.Method.Path
 	if cmd.Service.UseFlatPath && cmd.Method.FlatPath != "" {
@@ -40,15 +42,51 @@ func BuildRequest(cmd GeneratedCommand, pathParams map[string]string, queryParam
 		fullURL = u.String()
 	}
 
-	req, err := http.NewRequest(cmd.Method.HTTPMethod, fullURL, nil)
+	req, err := http.NewRequest(cmd.Method.HTTPMethod, fullURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	return req, nil
+}
+
+// ResolveURL builds the fully resolved URL for a command without creating
+// a full HTTP request. Used by --dry-run to show what would be sent.
+func ResolveURL(cmd GeneratedCommand, pathParams map[string]string, queryParams map[string]string) (string, error) {
+	pathTemplate := cmd.Method.Path
+	if cmd.Service.UseFlatPath && cmd.Method.FlatPath != "" {
+		pathTemplate = cmd.Method.FlatPath
+	}
+
+	resolvedPath, err := substitutePath(pathTemplate, pathParams)
+	if err != nil {
+		return "", err
+	}
+
+	fullURL := cmd.Service.BaseURL + resolvedPath
+
+	if len(queryParams) > 0 {
+		u, err := url.Parse(fullURL)
+		if err != nil {
+			return "", fmt.Errorf("parsing URL: %w", err)
+		}
+		q := u.Query()
+		for k, v := range queryParams {
+			if v != "" {
+				q.Set(k, v)
+			}
+		}
+		u.RawQuery = q.Encode()
+		fullURL = u.String()
+	}
+
+	return fullURL, nil
 }
 
 // substitutePath replaces path template variables with actual values.
