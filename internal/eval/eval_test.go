@@ -101,7 +101,9 @@ func TestCommandDiscovery(t *testing.T) {
 		"dcx spanner instances list", "dcx spanner instances get",
 		"dcx spanner databases list", "dcx spanner databases get",
 		"dcx spanner databases get-ddl", "dcx spanner schema describe",
+		"dcx spanner databases create", "dcx spanner databases drop-database",
 		"dcx spanner backups list", "dcx spanner backups get",
+		"dcx spanner backups create", "dcx spanner backups delete",
 		"dcx spanner database-operations list",
 		"dcx spanner instance-configs list", "dcx spanner instance-configs get",
 		// AlloyDB
@@ -151,8 +153,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 74 {
-		t.Errorf("expected at least 74 commands, got %d", len(commands))
+	if len(commands) < 78 {
+		t.Errorf("expected at least 78 commands, got %d", len(commands))
 	}
 }
 
