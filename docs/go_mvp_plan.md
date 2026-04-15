@@ -718,7 +718,7 @@ The right message is:
 ## Implementation status
 
 All 6 phases are complete. The Go MVP is functional with 66 commands
-across 10 domains, benchmarked at 5x faster than `bq`.
+across 11 domains, benchmarked at 5x faster than `bq`.
 
 | Phase | Status | PR |
 |-------|--------|-----|
