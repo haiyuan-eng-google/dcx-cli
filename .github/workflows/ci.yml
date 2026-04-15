@@ -6,8 +6,34 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+  unit-test:
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,5 +45,19 @@ jobs:
       - name: Build
         run: go build -o dcx ./cmd/dcx
 
-      - name: All tests
-        run: go test ./... -v -count=1
+      - name: Run unit tests
+        run: go test $(go list ./... | grep -v /eval) -v -count=1
+
+  integration-test:
+    name: Integration Tests (Eval Suite)
+    needs: [format, unit-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run eval suite
+        run: go test ./internal/eval/... -v -count=1 -timeout 120s
