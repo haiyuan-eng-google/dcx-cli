@@ -110,8 +110,7 @@ func registerOneCommand(
 			queryParams := make(map[string]string)
 			for name, val := range flagValues {
 				if *val != "" {
-					// Check if this flag is a path param — feed it into path resolution.
-					if param, ok := cmd.Method.Parameters[name]; ok && param.Location == "path" {
+					if isCommandPathFlag(name, cmd) {
 						globalFlags[name] = *val
 					} else {
 						queryParams[name] = *val
@@ -175,4 +174,18 @@ func registerOneCommand(
 		false, // Discovery GET commands are not mutations
 		false, // No dry-run for Discovery commands
 	))
+}
+
+// isCommandPathFlag checks if a flag name is a path parameter, checking both
+// the Discovery method parameters and the inferred flatPath flags.
+func isCommandPathFlag(name string, cmd GeneratedCommand) bool {
+	if param, ok := cmd.Method.Parameters[name]; ok && param.Location == "path" {
+		return true
+	}
+	for _, f := range cmd.CommandFlags {
+		if f.Name == name && f.Location == "path" {
+			return true
+		}
+	}
+	return false
 }

@@ -135,11 +135,23 @@ func ResolvePathParams(cmd GeneratedCommand, globalFlags map[string]string) (map
 		if paramName == "parent" {
 			continue
 		}
+		// Skip full-resource-path params in flatPath services — these are
+		// resolved by flatPath segment expansion below.
+		if cmd.Service.UseFlatPath && isFullResourcePathParam(param.Pattern) {
+			continue
+		}
 		if val, ok := globalFlags[paramName]; ok && val != "" {
 			pathParams[paramName] = val
 			flatKey := toFlatPathKey(paramName)
 			pathParams[flatKey] = val
 		}
+	}
+
+	// For flatPath services, resolve ALL {xxxId} segments from the flatPath
+	// using global flags. This handles intermediate parents (e.g., instancesId)
+	// that aren't in the ParentTemplate.
+	if cmd.Service.UseFlatPath && cmd.Method.FlatPath != "" {
+		resolveFlatPathSegments(pathParams, cmd.Method.FlatPath, cmd.Service.ParentTemplate, globalFlags)
 	}
 
 	return pathParams, nil
@@ -171,6 +183,42 @@ func expandFlatPathParams(params map[string]string, template string, flags map[s
 		if val, ok := flags[flagName]; ok && val != "" {
 			flatKey := resource[:len(resource)] + "Id" // e.g. "projectsId"
 			params[flatKey] = val
+		}
+	}
+}
+
+// resolveFlatPathSegments resolves ALL {xxxId} segments in a flatPath from
+// global flags. Uses the ParentTemplate for known mappings, then tries the
+// IDKey directly (CloudSQL style: {instance}), then derives flag names for
+// unknown segments (Spanner style: {instancesId}).
+func resolveFlatPathSegments(params map[string]string, flatPath, parentTemplate string, flags map[string]string) {
+	segments := parseFlatPathSegments(flatPath)
+	parentMap := buildParentFlagMap(parentTemplate)
+
+	for _, seg := range segments {
+		// Skip if already resolved.
+		if _, ok := params[seg.IDKey]; ok {
+			continue
+		}
+
+		// Try ParentTemplate mapping first.
+		if mapped, ok := parentMap[seg.IDKey]; ok {
+			if val, ok := flags[mapped]; ok && val != "" {
+				params[seg.IDKey] = val
+				continue
+			}
+		}
+
+		// Try the IDKey directly as a flag name (CloudSQL style: {instance}).
+		if val, ok := flags[seg.IDKey]; ok && val != "" {
+			params[seg.IDKey] = val
+			continue
+		}
+
+		// Derive flag name from resource name (Spanner style: {instancesId}).
+		flagName := deriveFlagName(seg.Resource)
+		if val, ok := flags[flagName]; ok && val != "" {
+			params[seg.IDKey] = val
 		}
 	}
 }

@@ -201,16 +201,19 @@ func normalizeListResponse(raw map[string]interface{}, domain string) ListEnvelo
 }
 
 // extractItems finds the items array in a raw API response.
-// Different APIs use different keys for the items array.
+// Tries known keys first, then falls back to any top-level array-valued key
+// (skipping metadata keys like nextPageToken). This handles new resource types
+// without requiring code changes.
 func extractItems(raw map[string]interface{}) []interface{} {
-	// Common item keys used by Google APIs.
-	itemKeys := []string{
-		"datasets", "tables", "routines", "models",       // BigQuery
-		"instances", "databases", "clusters", "backups",    // Spanner/AlloyDB/CloudSQL/Looker
-		"items",                                            // generic fallback
+	// Known item keys used by Google APIs — checked first for determinism.
+	knownKeys := []string{
+		"datasets", "tables", "routines", "models", "jobs",   // BigQuery
+		"instances", "databases", "clusters", "backups",       // Spanner/AlloyDB/CloudSQL/Looker
+		"operations", "users", "backupRuns", "flags",          // additional surfaces
+		"items",                                               // generic
 	}
 
-	for _, key := range itemKeys {
+	for _, key := range knownKeys {
 		if items, ok := raw[key]; ok {
 			if arr, ok := items.([]interface{}); ok {
 				return arr
@@ -218,7 +221,19 @@ func extractItems(raw map[string]interface{}) []interface{} {
 		}
 	}
 
-	// If no known items key, return the raw response as a single item.
+	// Fallback: find any top-level key whose value is a JSON array,
+	// skipping pagination/metadata keys.
+	skip := map[string]bool{"nextPageToken": true, "kind": true, "etag": true}
+	for key, val := range raw {
+		if skip[key] {
+			continue
+		}
+		if arr, ok := val.([]interface{}); ok {
+			return arr
+		}
+	}
+
+	// Nothing found — return the raw response as a single item.
 	return []interface{}{raw}
 }
 
@@ -275,15 +290,17 @@ func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string)
 				continue
 			}
 
-			// Check if param is "parent" and handled by template.
-			if paramName == "parent" && cmd.Service.ParentTemplate != "" {
-				template := cmd.Service.ParentTemplate
-				for name := range globalFlags {
-					template = strings.ReplaceAll(template, "{"+name+"}", "OK")
+			// Check if param is "parent" and handled by template or flatPath.
+			if paramName == "parent" {
+				if err := validateParentFlags(cmd, globalFlags); err != nil {
+					return err
 				}
-				if strings.Contains(template, "{") {
-					return fmt.Errorf("parent template requires flags not provided: %s", cmd.Service.ParentTemplate)
-				}
+				continue
+			}
+
+			// Skip full-resource-path params in flatPath services — these are
+			// validated via the individual flatPath segment flags.
+			if cmd.Service.UseFlatPath && isFullResourcePathParam(param.Pattern) {
 				continue
 			}
 
@@ -292,6 +309,61 @@ func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string)
 				return fmt.Errorf("required flag --%s is missing", camelToKebab(paramName))
 			}
 		}
+	}
+
+	// For flatPath services, validate that all intermediate segment flags
+	// are provided.
+	if cmd.Service.UseFlatPath && cmd.Method.FlatPath != "" {
+		if err := validateFlatPathFlags(cmd, globalFlags); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateParentFlags checks that all flags needed for the parent are provided.
+// Uses the ParentTemplate for top-level parents and the flatPath for deeper ones.
+func validateParentFlags(cmd GeneratedCommand, globalFlags map[string]string) error {
+	if cmd.Service.ParentTemplate != "" {
+		template := cmd.Service.ParentTemplate
+		for name := range globalFlags {
+			template = strings.ReplaceAll(template, "{"+name+"}", "OK")
+		}
+		if strings.Contains(template, "{") {
+			return fmt.Errorf("parent template requires flags not provided: %s", cmd.Service.ParentTemplate)
+		}
+	}
+	// Intermediate flags are validated by validateFlatPathFlags.
+	return nil
+}
+
+// validateFlatPathFlags checks that all flatPath segment flags are provided.
+func validateFlatPathFlags(cmd GeneratedCommand, globalFlags map[string]string) error {
+	segments := parseFlatPathSegments(cmd.Method.FlatPath)
+	parentMap := buildParentFlagMap(cmd.Service.ParentTemplate)
+
+	for _, seg := range segments {
+		// Try ParentTemplate mapping.
+		if mapped, ok := parentMap[seg.IDKey]; ok {
+			if val, ok := globalFlags[mapped]; ok && val != "" {
+				continue
+			}
+			return fmt.Errorf("required flag --%s is missing", mapped)
+		}
+
+		// Try IDKey directly as a flag (CloudSQL style: {instance}).
+		if val, ok := globalFlags[seg.IDKey]; ok && val != "" {
+			continue
+		}
+
+		// Try derived flag name (Spanner style: {instancesId} → --instance-id).
+		flagName := deriveFlagName(seg.Resource)
+		if val, ok := globalFlags[flagName]; ok && val != "" {
+			continue
+		}
+
+		return fmt.Errorf("required flag --%s is missing", flagName)
 	}
 	return nil
 }

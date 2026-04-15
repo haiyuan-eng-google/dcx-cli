@@ -103,7 +103,13 @@ func extractMethods(
 			cmdPath = camelToKebab(cmdPath)
 
 			// Separate global-mapped params from command-specific flags.
-			cmdFlags := extractCommandFlags(apiMethod.Parameters, svc.GlobalParamMappings)
+			cmdFlags := extractCommandFlags(apiMethod.Parameters, svc)
+
+			// For flatPath services, infer CLI flags for intermediate
+			// resource IDs not covered by the ParentTemplate.
+			if svc.UseFlatPath && apiMethod.FlatPath != "" {
+				cmdFlags = append(cmdFlags, inferFlatPathFlags(apiMethod.FlatPath, svc, cmdFlags)...)
+			}
 
 			*out = append(*out, GeneratedCommand{
 				CommandPath:  cmdPath,
@@ -138,20 +144,27 @@ func convertParams(params map[string]discoveryParam) map[string]ApiParam {
 
 // extractCommandFlags returns params that should become CLI flags.
 // This includes query params AND path params that are not handled by
-// global flag mappings or parent templates.
-func extractCommandFlags(params map[string]ApiParam, globalMappings map[string]string) []ApiParam {
+// global flag mappings, parent templates, or flatPath segment resolution.
+func extractCommandFlags(params map[string]ApiParam, svc *ServiceConfig) []ApiParam {
 	var flags []ApiParam
 	for name, param := range params {
 		// Skip if this param is mapped to a global flag.
-		if _, isGlobal := globalMappings[name]; isGlobal {
+		if _, isGlobal := svc.GlobalParamMappings[name]; isGlobal {
 			continue
 		}
-		// Skip "parent" param — constructed from global flags via ParentTemplate.
+		// Skip "parent" param — constructed from global flags via ParentTemplate
+		// or flatPath segment resolution.
 		if name == "parent" {
 			continue
 		}
 		// Skip pagination params — handled by dedicated --page-token/--page-all flags.
 		if name == "pageToken" || name == "pageSize" {
+			continue
+		}
+		// For flatPath services, skip path params whose pattern contains "/"
+		// (full resource paths like "projects/x/instances/x/databases/x").
+		// These are constructed from individual flatPath segment flags.
+		if svc.UseFlatPath && param.Location == "path" && isFullResourcePathParam(param.Pattern) {
 			continue
 		}
 		// Include both query params and non-global path params (resource IDs
@@ -161,6 +174,61 @@ func extractCommandFlags(params map[string]ApiParam, globalMappings map[string]s
 		}
 	}
 	return flags
+}
+
+// inferFlatPathFlags parses the flatPath to find intermediate resource IDs
+// that aren't covered by the ParentTemplate, GlobalParamMappings, or
+// already-extracted flags. Returns additional CLI flags needed for nested
+// resource resolution.
+func inferFlatPathFlags(flatPath string, svc *ServiceConfig, existingFlags []ApiParam) []ApiParam {
+	segments := parseFlatPathSegments(flatPath)
+	parentMap := buildParentFlagMap(svc.ParentTemplate)
+
+	// Build sets for dedup — include existing flag names AND raw IDKeys
+	// (CloudSQL uses {instance} not {instancesId}, and the flag name matches).
+	existing := make(map[string]bool)
+	for _, f := range existingFlags {
+		existing[f.Name] = true
+	}
+	for _, flagName := range svc.GlobalParamMappings {
+		existing[flagName] = true
+	}
+	for paramName := range svc.GlobalParamMappings {
+		existing[paramName] = true
+	}
+
+	var newFlags []ApiParam
+	for _, seg := range segments {
+		// Skip if handled by ParentTemplate.
+		if _, ok := parentMap[seg.IDKey]; ok {
+			continue
+		}
+		// Skip if the IDKey itself matches an existing flag (CloudSQL style).
+		if existing[seg.IDKey] {
+			continue
+		}
+
+		flagName := deriveFlagName(seg.Resource)
+		if existing[flagName] {
+			continue
+		}
+		existing[flagName] = true
+
+		singular := seg.Resource
+		if strings.HasSuffix(singular, "s") {
+			singular = singular[:len(singular)-1]
+		}
+
+		newFlags = append(newFlags, ApiParam{
+			Name:        flagName,
+			Type:        "string",
+			Description: singular + " ID",
+			Location:    "path",
+			Required:    true,
+		})
+	}
+
+	return newFlags
 }
 
 // camelToKebab converts camelCase segments in a space-separated path
