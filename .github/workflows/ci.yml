@@ -22,7 +22,7 @@ jobs:
 
       - name: Check gofmt
         run: |
-          unformatted=$(gofmt -l ./cmd ./internal)
+          unformatted=$(find . -name '*.go' -not -path './.worktrees/*' -not -path './vendor/*' | xargs gofmt -l)
           if [ -n "$unformatted" ]; then
             echo "::error::Files not formatted with gofmt:"
             echo "$unformatted"
