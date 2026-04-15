@@ -144,11 +144,11 @@ dcx generates commands from bundled Google Cloud Discovery Documents
 
 | Service | Namespace | Discovery Doc | Commands |
 |---------|-----------|---------------|----------|
-| BigQuery | _(top-level)_ | `bigquery/v2` | datasets, tables |
-| Spanner | `spanner` | `spanner/v1` | instances, databases, getDdl |
-| AlloyDB | `alloydb` | `alloydb/v1` | clusters, instances |
-| Cloud SQL | `cloudsql` | `sqladmin/v1` | instances, databases |
-| Looker | `looker` | `looker/v1` | instances |
+| BigQuery | _(top-level)_ | `bigquery/v2` | datasets, tables, jobs, models, routines |
+| Spanner | `spanner` | `spanner/v1` | instances, databases, backups, databaseOperations, instanceConfigs |
+| AlloyDB | `alloydb` | `alloydb/v1` | clusters, instances, backups, users, operations |
+| Cloud SQL | `cloudsql` | `sqladmin/v1` | instances, databases, backupRuns, users, operations, flags, tiers |
+| Looker | `looker` | `looker/v1` | instances, backups |
 
 ### Contract System
 

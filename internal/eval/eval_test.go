@@ -87,27 +87,40 @@ func TestCommandDiscovery(t *testing.T) {
 		t.Fatalf("parsing meta commands output: %v", err)
 	}
 
-	// All P0 commands must be present.
-	p0Commands := []string{
-		// BigQuery
+	// All shipped commands must be present.
+	requiredCommands := []string{
+		// BigQuery (Discovery + static)
 		"dcx datasets list", "dcx datasets get",
 		"dcx tables list", "dcx tables get",
-		"dcx jobs query",
+		"dcx jobs list", "dcx jobs get", "dcx jobs query",
+		"dcx models list", "dcx models get",
+		"dcx routines list", "dcx routines get",
 		// Spanner
 		"dcx spanner instances list", "dcx spanner instances get",
 		"dcx spanner databases list", "dcx spanner databases get",
 		"dcx spanner databases get-ddl", "dcx spanner schema describe",
+		"dcx spanner backups list", "dcx spanner backups get",
+		"dcx spanner database-operations list",
+		"dcx spanner instance-configs list", "dcx spanner instance-configs get",
 		// AlloyDB
 		"dcx alloydb clusters list", "dcx alloydb clusters get",
 		"dcx alloydb instances list", "dcx alloydb instances get",
 		"dcx alloydb databases list", "dcx alloydb schema describe",
+		"dcx alloydb backups list", "dcx alloydb backups get",
+		"dcx alloydb users list", "dcx alloydb users get",
+		"dcx alloydb operations list", "dcx alloydb operations get",
 		// Cloud SQL
 		"dcx cloudsql instances list", "dcx cloudsql instances get",
 		"dcx cloudsql databases list", "dcx cloudsql databases get",
 		"dcx cloudsql schema describe",
+		"dcx cloudsql backup-runs list", "dcx cloudsql backup-runs get",
+		"dcx cloudsql users list", "dcx cloudsql users get",
+		"dcx cloudsql operations list", "dcx cloudsql operations get",
+		"dcx cloudsql flags list", "dcx cloudsql tiers list",
 		// Looker
 		"dcx looker instances list", "dcx looker instances get",
 		"dcx looker explores list", "dcx looker dashboards get",
+		"dcx looker backups list", "dcx looker backups get",
 		// CA
 		"dcx ca ask",
 		"dcx ca create-agent", "dcx ca list-agents", "dcx ca add-verified-query",
@@ -126,7 +139,7 @@ func TestCommandDiscovery(t *testing.T) {
 		registered[c.Command] = true
 	}
 
-	for _, want := range p0Commands {
+	for _, want := range requiredCommands {
 		if !registered[want] {
 			t.Errorf("P0 command not registered: %s", want)
 		}
