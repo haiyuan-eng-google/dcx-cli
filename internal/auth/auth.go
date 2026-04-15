@@ -32,8 +32,8 @@ type Config struct {
 
 // ResolvedAuth describes which auth method was used.
 type ResolvedAuth struct {
-	Method      string `json:"method"`       // "token", "credentials_file", "adc_file", "default_adc"
-	Source      string `json:"source"`       // e.g. "DCX_TOKEN", "--token", file path
+	Method      string `json:"method"` // "token", "credentials_file", "adc_file", "default_adc"
+	Source      string `json:"source"` // e.g. "DCX_TOKEN", "--token", file path
 	ProjectID   string `json:"project_id,omitempty"`
 	TokenSource oauth2.TokenSource
 }
@@ -139,7 +139,7 @@ func Check(ctx context.Context, cfg Config) StatusResult {
 		return StatusResult{
 			Authenticated: false,
 			Method:        resolved.Method,
-			Source:         resolved.Source,
+			Source:        resolved.Source,
 			Error:         tokenErr.Error(),
 		}
 	}
@@ -147,7 +147,7 @@ func Check(ctx context.Context, cfg Config) StatusResult {
 	return StatusResult{
 		Authenticated: true,
 		Method:        resolved.Method,
-		Source:         resolved.Source,
+		Source:        resolved.Source,
 		ProjectID:     resolved.ProjectID,
 	}
 }

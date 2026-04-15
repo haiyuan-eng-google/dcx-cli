@@ -44,9 +44,9 @@ func buildParentFlagMap(parentTemplate string) map[string]string {
 	m := make(map[string]string)
 	parts := strings.Split(parentTemplate, "/")
 	for i := 0; i+1 < len(parts); i += 2 {
-		resource := parts[i]                     // e.g., "projects"
+		resource := parts[i]                       // e.g., "projects"
 		flagName := strings.Trim(parts[i+1], "{}") // e.g., "project-id"
-		flatKey := resource + "Id"               // e.g., "projectsId"
+		flatKey := resource + "Id"                 // e.g., "projectsId"
 		m[flatKey] = flagName
 	}
 	return m

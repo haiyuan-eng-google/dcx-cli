@@ -17,11 +17,11 @@ import (
 type SourceType string
 
 const (
-	BigQuery    SourceType = "bigquery"
-	Spanner     SourceType = "spanner"
-	AlloyDB     SourceType = "alloy_db"
-	CloudSQL    SourceType = "cloud_sql"
-	Looker      SourceType = "looker"
+	BigQuery     SourceType = "bigquery"
+	Spanner      SourceType = "spanner"
+	AlloyDB      SourceType = "alloy_db"
+	CloudSQL     SourceType = "cloud_sql"
+	Looker       SourceType = "looker"
 	LookerStudio SourceType = "looker_studio"
 )
 
@@ -45,11 +45,11 @@ type Profile struct {
 	DBType string `yaml:"db_type,omitempty" json:"db_type,omitempty"` // "mysql" or "postgresql"
 
 	// Looker-specific fields.
-	LookerInstanceID  string   `yaml:"looker_instance_id,omitempty" json:"looker_instance_id,omitempty"`
-	LookerInstanceURL string   `yaml:"looker_instance_url,omitempty" json:"looker_instance_url,omitempty"`
-	LookerExplores    []string `yaml:"looker_explores,omitempty" json:"looker_explores,omitempty"`
-	LookerClientID    string   `yaml:"looker_client_id,omitempty" json:"looker_client_id,omitempty"`
-	LookerClientSecret string  `yaml:"looker_client_secret,omitempty" json:"looker_client_secret,omitempty"`
+	LookerInstanceID   string   `yaml:"looker_instance_id,omitempty" json:"looker_instance_id,omitempty"`
+	LookerInstanceURL  string   `yaml:"looker_instance_url,omitempty" json:"looker_instance_url,omitempty"`
+	LookerExplores     []string `yaml:"looker_explores,omitempty" json:"looker_explores,omitempty"`
+	LookerClientID     string   `yaml:"looker_client_id,omitempty" json:"looker_client_id,omitempty"`
+	LookerClientSecret string   `yaml:"looker_client_secret,omitempty" json:"looker_client_secret,omitempty"`
 
 	// CA-specific fields.
 	ContextSetID string `yaml:"context_set_id,omitempty" json:"context_set_id,omitempty"`

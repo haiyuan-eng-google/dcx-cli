@@ -207,10 +207,10 @@ func normalizeListResponse(raw map[string]interface{}, domain string) ListEnvelo
 func extractItems(raw map[string]interface{}) []interface{} {
 	// Known item keys used by Google APIs — checked first for determinism.
 	knownKeys := []string{
-		"datasets", "tables", "routines", "models", "jobs",   // BigQuery
-		"instances", "databases", "clusters", "backups",       // Spanner/AlloyDB/CloudSQL/Looker
-		"operations", "users", "backupRuns", "flags",          // additional surfaces
-		"items",                                               // generic
+		"datasets", "tables", "routines", "models", "jobs", // BigQuery
+		"instances", "databases", "clusters", "backups", // Spanner/AlloyDB/CloudSQL/Looker
+		"operations", "users", "backupRuns", "flags", // additional surfaces
+		"items", // generic
 	}
 
 	for _, key := range knownKeys {

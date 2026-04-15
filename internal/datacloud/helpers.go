@@ -13,10 +13,10 @@ import (
 
 // SchemaDescribeResult is the output of schema describe.
 type SchemaDescribeResult struct {
-	Source     string      `json:"source"`
-	Database   string      `json:"database"`
-	Instance   string      `json:"instance"`
-	Schema     interface{} `json:"schema"`
+	Source   string      `json:"source"`
+	Database string      `json:"database"`
+	Instance string      `json:"instance"`
+	Schema   interface{} `json:"schema"`
 }
 
 // DatabasesListResult is the output of databases list for AlloyDB/CloudSQL.

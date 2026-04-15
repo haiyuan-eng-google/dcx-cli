@@ -52,7 +52,7 @@ type DataAgent struct {
 	Name               string              `json:"name,omitempty"`
 	DisplayName        string              `json:"displayName,omitempty"`
 	Description        string              `json:"description,omitempty"`
-	DataAnalyticsAgent *DataAnalyticsAgent  `json:"dataAnalyticsAgent,omitempty"`
+	DataAnalyticsAgent *DataAnalyticsAgent `json:"dataAnalyticsAgent,omitempty"`
 	CreateTime         string              `json:"createTime,omitempty"`
 	UpdateTime         string              `json:"updateTime,omitempty"`
 }
@@ -60,20 +60,20 @@ type DataAgent struct {
 // CreateAgentOpts holds the user-facing options for ca create-agent.
 // These are mapped into the DataAgent API shape by the client.
 type CreateAgentOpts struct {
-	AgentID      string         // passed as ?dataAgentId= query param
-	DisplayName  string
-	Tables       []string       // "project.dataset.table" refs
-	Views        []string       // additional view refs (also as table refs)
+	AgentID        string // passed as ?dataAgentId= query param
+	DisplayName    string
+	Tables         []string // "project.dataset.table" refs
+	Views          []string // additional view refs (also as table refs)
 	ExampleQueries []ExampleQuery
-	Instructions string
+	Instructions   string
 }
 
 // AgentSummary is the dcx output representation for a single agent.
 type AgentSummary struct {
-	Name            string `json:"name"`
-	DisplayName     string `json:"display_name,omitempty"`
-	ExampleQueries  int    `json:"example_queries_count,omitempty"`
-	CreateTime      string `json:"create_time,omitempty"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name,omitempty"`
+	ExampleQueries int    `json:"example_queries_count,omitempty"`
+	CreateTime     string `json:"create_time,omitempty"`
 }
 
 // AgentsListResult is the output of ca list-agents.

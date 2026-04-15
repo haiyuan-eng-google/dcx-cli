@@ -177,8 +177,8 @@ func resolveParentTemplate(template string, flags map[string]string) (string, er
 func expandFlatPathParams(params map[string]string, template string, flags map[string]string) {
 	parts := strings.Split(template, "/")
 	for i := 0; i+1 < len(parts); i += 2 {
-		resource := parts[i]    // e.g. "projects"
-		flagRef := parts[i+1]   // e.g. "{project-id}"
+		resource := parts[i]  // e.g. "projects"
+		flagRef := parts[i+1] // e.g. "{project-id}"
 		flagName := strings.Trim(flagRef, "{}")
 		if val, ok := flags[flagName]; ok && val != "" {
 			flatKey := resource[:len(resource)] + "Id" // e.g. "projectsId"

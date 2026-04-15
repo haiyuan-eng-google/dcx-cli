@@ -15,17 +15,17 @@ import (
 type ErrorCode string
 
 const (
-	MissingArgument  ErrorCode = "MISSING_ARGUMENT"
+	MissingArgument   ErrorCode = "MISSING_ARGUMENT"
 	InvalidIdentifier ErrorCode = "INVALID_IDENTIFIER"
-	InvalidConfig    ErrorCode = "INVALID_CONFIG"
-	UnknownCommand   ErrorCode = "UNKNOWN_COMMAND"
-	AuthError        ErrorCode = "AUTH_ERROR"
-	APIError         ErrorCode = "API_ERROR"
-	NotFound         ErrorCode = "NOT_FOUND"
-	Conflict         ErrorCode = "CONFLICT"
-	EvalFailed       ErrorCode = "EVAL_FAILED"
-	InfraError       ErrorCode = "INFRA_ERROR"
-	Internal         ErrorCode = "INTERNAL"
+	InvalidConfig     ErrorCode = "INVALID_CONFIG"
+	UnknownCommand    ErrorCode = "UNKNOWN_COMMAND"
+	AuthError         ErrorCode = "AUTH_ERROR"
+	APIError          ErrorCode = "API_ERROR"
+	NotFound          ErrorCode = "NOT_FOUND"
+	Conflict          ErrorCode = "CONFLICT"
+	EvalFailed        ErrorCode = "EVAL_FAILED"
+	InfraError        ErrorCode = "INFRA_ERROR"
+	Internal          ErrorCode = "INTERNAL"
 )
 
 // ExitCode maps error categories to process exit codes.
