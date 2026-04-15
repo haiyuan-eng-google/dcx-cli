@@ -176,6 +176,12 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		return
 	}
 
+	// Block mutations — MCP bridge is read-only.
+	if contract, ok := s.Registry.Get(toolNameToCommand(params.Name)); ok && contract.IsMutation {
+		s.writeError(req.ID, -32601, "Method not allowed", "MCP bridge is read-only; mutation commands are not available")
+		return
+	}
+
 	// Convert tool name back to command args.
 	cmdArgs := toolNameToArgs(params.Name)
 
@@ -242,6 +248,12 @@ func (s *Server) writeError(id interface{}, code int, message, data string) {
 // commandToToolName converts "dcx datasets list" to "dcx_datasets_list".
 func commandToToolName(command string) string {
 	return strings.ReplaceAll(command, " ", "_")
+}
+
+// toolNameToCommand converts "dcx_datasets_list" to "dcx datasets list"
+// for registry lookup.
+func toolNameToCommand(name string) string {
+	return strings.ReplaceAll(name, "_", " ")
 }
 
 // toolNameToArgs converts "dcx_datasets_list" to ["datasets", "list"].

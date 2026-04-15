@@ -55,6 +55,22 @@ type ApiMethod struct {
 	FlatPath       string              `json:"flatPath"`   // Simplified path template
 	Parameters     map[string]ApiParam `json:"parameters"`
 	ParameterOrder []string            `json:"parameterOrder"`
+	RequestRef     string              `json:"requestRef,omitempty"` // Schema $ref for request body (e.g. "Dataset")
+}
+
+// IsMutation returns true if the method modifies state (non-GET).
+func (m ApiMethod) IsMutation() bool {
+	return m.HTTPMethod != "GET"
+}
+
+// AcceptsBody returns true if the method expects a JSON request body.
+func (m ApiMethod) AcceptsBody() bool {
+	return m.RequestRef != ""
+}
+
+// RequiresConfirmation returns true if the method is destructive (DELETE).
+func (m ApiMethod) RequiresConfirmation() bool {
+	return m.HTTPMethod == "DELETE"
 }
 
 // GeneratedCommand is a fully resolved command ready for CLI registration.

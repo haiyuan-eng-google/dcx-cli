@@ -68,7 +68,7 @@ func TestBuildRequestBigQuery(t *testing.T) {
 	pathParams := map[string]string{"projectId": "my-project"}
 	queryParams := map[string]string{"maxResults": "10"}
 
-	req, err := BuildRequest(cmd, pathParams, queryParams, "test-token")
+	req, err := BuildRequest(cmd, pathParams, queryParams, "test-token", nil)
 	if err != nil {
 		t.Fatalf("BuildRequest: %v", err)
 	}
