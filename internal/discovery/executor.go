@@ -64,8 +64,8 @@ func (e *Executor) Execute(
 		return nil
 	}
 
-	// 3. Validate required path params.
-	if validErr := validateRequiredParams(cmd, globalFlags); validErr != nil {
+	// 3. Validate required params (path + query).
+	if validErr := validateRequiredParams(cmd, globalFlags, queryParams); validErr != nil {
 		dcxerrors.Emit(dcxerrors.MissingArgument, validErr.Error(), "")
 		return nil
 	}
@@ -283,7 +283,7 @@ func handleErrorResponse(resp *http.Response) error {
 	return nil
 }
 
-func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string) error {
+func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string, queryParams map[string]string) error {
 	for paramName, param := range cmd.Method.Parameters {
 		if !param.Required {
 			continue
@@ -314,6 +314,12 @@ func validateRequiredParams(cmd GeneratedCommand, globalFlags map[string]string)
 
 			// Command-specific path param (resource ID).
 			if val, ok := globalFlags[paramName]; !ok || val == "" {
+				return fmt.Errorf("required flag --%s is missing", camelToKebab(paramName))
+			}
+		}
+
+		if param.Location == "query" {
+			if val, ok := queryParams[paramName]; !ok || val == "" {
 				return fmt.Errorf("required flag --%s is missing", camelToKebab(paramName))
 			}
 		}

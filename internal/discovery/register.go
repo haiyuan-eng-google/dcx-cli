@@ -263,7 +263,7 @@ func executeMutationFlow(
 		dcxerrors.Emit(dcxerrors.MissingArgument, err.Error(), "")
 		return nil
 	}
-	if validErr := validateRequiredParams(cmd, globalFlags); validErr != nil {
+	if validErr := validateRequiredParams(cmd, globalFlags, queryParams); validErr != nil {
 		dcxerrors.Emit(dcxerrors.MissingArgument, validErr.Error(), "")
 		return nil
 	}

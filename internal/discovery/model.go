@@ -42,6 +42,7 @@ type ApiParam struct {
 	Required    bool   `json:"required"`
 	Pattern     string `json:"pattern,omitempty"`
 	Format      string `json:"format,omitempty"`
+	Repeated    bool   `json:"repeated,omitempty"`
 }
 
 // ApiMethod describes an extracted method from the Discovery Document.

@@ -27,20 +27,7 @@ func BuildRequest(cmd GeneratedCommand, pathParams map[string]string, queryParam
 	fullURL := cmd.Service.BaseURL + resolvedPath
 
 	// Add query parameters.
-	if len(queryParams) > 0 {
-		u, err := url.Parse(fullURL)
-		if err != nil {
-			return nil, fmt.Errorf("parsing URL: %w", err)
-		}
-		q := u.Query()
-		for k, v := range queryParams {
-			if v != "" {
-				q.Set(k, v)
-			}
-		}
-		u.RawQuery = q.Encode()
-		fullURL = u.String()
-	}
+	fullURL = appendQueryParams(fullURL, queryParams, cmd.Method.Parameters)
 
 	req, err := http.NewRequest(cmd.Method.HTTPMethod, fullURL, body)
 	if err != nil {
@@ -71,22 +58,39 @@ func ResolveURL(cmd GeneratedCommand, pathParams map[string]string, queryParams 
 
 	fullURL := cmd.Service.BaseURL + resolvedPath
 
-	if len(queryParams) > 0 {
-		u, err := url.Parse(fullURL)
-		if err != nil {
-			return "", fmt.Errorf("parsing URL: %w", err)
-		}
-		q := u.Query()
-		for k, v := range queryParams {
-			if v != "" {
-				q.Set(k, v)
-			}
-		}
-		u.RawQuery = q.Encode()
-		fullURL = u.String()
-	}
+	fullURL = appendQueryParams(fullURL, queryParams, cmd.Method.Parameters)
 
 	return fullURL, nil
+}
+
+// appendQueryParams adds query parameters to a URL, handling repeated params
+// by splitting comma-separated values and using q.Add() for each.
+func appendQueryParams(rawURL string, queryParams map[string]string, methodParams map[string]ApiParam) string {
+	if len(queryParams) == 0 {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	for k, v := range queryParams {
+		if v == "" {
+			continue
+		}
+		if p, ok := methodParams[k]; ok && p.Repeated {
+			for _, part := range strings.Split(v, ",") {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					q.Add(k, part)
+				}
+			}
+		} else {
+			q.Set(k, v)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // substitutePath replaces path template variables with actual values.
