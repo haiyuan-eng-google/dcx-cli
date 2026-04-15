@@ -114,9 +114,11 @@ func TestCommandDiscovery(t *testing.T) {
 		// Cloud SQL
 		"dcx cloudsql instances list", "dcx cloudsql instances get",
 		"dcx cloudsql databases list", "dcx cloudsql databases get",
+		"dcx cloudsql databases insert", "dcx cloudsql databases delete",
 		"dcx cloudsql schema describe",
 		"dcx cloudsql backup-runs list", "dcx cloudsql backup-runs get",
 		"dcx cloudsql users list", "dcx cloudsql users get",
+		"dcx cloudsql users insert", "dcx cloudsql users delete",
 		"dcx cloudsql operations list", "dcx cloudsql operations get",
 		"dcx cloudsql flags list", "dcx cloudsql tiers list",
 		// Looker
@@ -149,8 +151,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 70 {
-		t.Errorf("expected at least 70 commands, got %d", len(commands))
+	if len(commands) < 74 {
+		t.Errorf("expected at least 74 commands, got %d", len(commands))
 	}
 }
 
