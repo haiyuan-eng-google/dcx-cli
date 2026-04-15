@@ -8,9 +8,9 @@ import (
 
 // discoveryDoc represents the top-level structure of a Google Discovery Document.
 type discoveryDoc struct {
-	BaseURL     string                     `json:"baseUrl"`
-	RootURL     string                     `json:"rootUrl"`
-	ServicePath string                     `json:"servicePath"`
+	BaseURL     string                       `json:"baseUrl"`
+	RootURL     string                       `json:"rootUrl"`
+	ServicePath string                       `json:"servicePath"`
 	Resources   map[string]discoveryResource `json:"resources"`
 }
 
@@ -20,13 +20,13 @@ type discoveryResource struct {
 }
 
 type discoveryMethod struct {
-	ID             string                       `json:"id"`
-	Description    string                       `json:"description"`
-	HTTPMethod     string                       `json:"httpMethod"`
-	Path           string                       `json:"path"`
-	FlatPath       string                       `json:"flatPath"`
-	Parameters     map[string]discoveryParam    `json:"parameters"`
-	ParameterOrder []string                     `json:"parameterOrder"`
+	ID             string                    `json:"id"`
+	Description    string                    `json:"description"`
+	HTTPMethod     string                    `json:"httpMethod"`
+	Path           string                    `json:"path"`
+	FlatPath       string                    `json:"flatPath"`
+	Parameters     map[string]discoveryParam `json:"parameters"`
+	ParameterOrder []string                  `json:"parameterOrder"`
 }
 
 type discoveryParam struct {

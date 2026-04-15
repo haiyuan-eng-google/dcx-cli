@@ -29,15 +29,15 @@ type QueryRequest struct {
 // QueryResponse represents the BigQuery query response, used for
 // rendering structured output.
 type QueryResponse struct {
-	Kind         string           `json:"kind,omitempty"`
-	Schema       *TableSchema     `json:"schema,omitempty"`
-	Rows         []TableRow       `json:"rows,omitempty"`
-	TotalRows    string           `json:"totalRows,omitempty"`
-	JobComplete  bool             `json:"jobComplete"`
-	JobReference *JobReference    `json:"jobReference,omitempty"`
-	CacheHit     bool             `json:"cacheHit,omitempty"`
+	Kind         string        `json:"kind,omitempty"`
+	Schema       *TableSchema  `json:"schema,omitempty"`
+	Rows         []TableRow    `json:"rows,omitempty"`
+	TotalRows    string        `json:"totalRows,omitempty"`
+	JobComplete  bool          `json:"jobComplete"`
+	JobReference *JobReference `json:"jobReference,omitempty"`
+	CacheHit     bool          `json:"cacheHit,omitempty"`
 	// Dry-run specific fields.
-	TotalBytesProcessed string `json:"totalBytesProcessed,omitempty"`
+	TotalBytesProcessed string           `json:"totalBytesProcessed,omitempty"`
 	Statistics          *QueryStatistics `json:"statistics,omitempty"`
 }
 
@@ -48,9 +48,9 @@ type TableSchema struct {
 
 // SchemaField describes a single field in a BigQuery schema.
 type SchemaField struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Mode   string `json:"mode,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Mode string `json:"mode,omitempty"`
 }
 
 // TableRow is a single row in a BigQuery result set.

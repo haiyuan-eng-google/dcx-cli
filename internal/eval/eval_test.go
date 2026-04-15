@@ -420,11 +420,11 @@ func TestSkillAlignment(t *testing.T) {
 	// Known P1 (deferred) commands that skills may reference.
 	// These are logged but not failures.
 	p1Commands := map[string]bool{
-		"dcx auth login":              true,
-		"dcx auth logout":             true,
-		"dcx looker explores get":     true,
-		"dcx looker dashboards list":  true,
-		"dcx generate-skills":         true,
+		"dcx auth login":             true,
+		"dcx auth logout":            true,
+		"dcx looker explores get":    true,
+		"dcx looker dashboards list": true,
+		"dcx generate-skills":        true,
 	}
 
 	// Regex to find dcx command references in skill docs.

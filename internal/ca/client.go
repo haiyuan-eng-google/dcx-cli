@@ -25,10 +25,10 @@ const (
 	queryDataURLFmt = caBaseURL + "/projects/%s/locations/%s:queryData"
 
 	// Agent management endpoints (sync variants return result directly).
-	dataAgentsURLFmt    = caBaseURL + "/projects/%s/locations/%s/dataAgents"
-	dataAgentURLFmt     = caBaseURL + "/%s" // takes full resource name
-	createAgentSyncFmt  = caBaseURL + "/projects/%s/locations/%s/dataAgents:createSync?dataAgentId=%s"
-	updateAgentSyncFmt  = caBaseURL + "/%s:updateSync?updateMask=%s"
+	dataAgentsURLFmt   = caBaseURL + "/projects/%s/locations/%s/dataAgents"
+	dataAgentURLFmt    = caBaseURL + "/%s" // takes full resource name
+	createAgentSyncFmt = caBaseURL + "/projects/%s/locations/%s/dataAgents:createSync?dataAgentId=%s"
+	updateAgentSyncFmt = caBaseURL + "/%s:updateSync?updateMask=%s"
 )
 
 // Client provides access to the Conversational Analytics APIs.
@@ -514,7 +514,7 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, _ strin
 	for _, eq := range opts.ExampleQueries {
 		existingQueries = append(existingQueries, map[string]interface{}{
 			"naturalLanguageQuestion": eq.NaturalLanguageQuestion,
-			"sqlQuery":               eq.SQLQuery,
+			"sqlQuery":                eq.SQLQuery,
 		})
 	}
 	published["exampleQueries"] = existingQueries
@@ -556,10 +556,10 @@ func (c *Client) AddVerifiedQuery(ctx context.Context, token, projectID, _ strin
 	total := len(existingQueries)
 
 	return &AddVerifiedQueryResult{
-		Agent:              opts.AgentName,
-		QueriesAdded:       len(opts.ExampleQueries),
+		Agent:                opts.AgentName,
+		QueriesAdded:         len(opts.ExampleQueries),
 		TotalVerifiedQueries: total,
-		Status:             "added",
+		Status:               "added",
 	}, nil
 }
 
@@ -625,8 +625,8 @@ func buildLookerExploreRefs(profile *profiles.Profile) []map[string]interface{} 
 		if len(parts) == 2 {
 			ref := map[string]interface{}{
 				"lookerInstanceUri": instanceURL,
-				"lookmlModel":      parts[0],
-				"explore":          parts[1],
+				"lookmlModel":       parts[0],
+				"explore":           parts[1],
 			}
 			refs = append(refs, ref)
 		}

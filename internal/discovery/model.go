@@ -46,13 +46,13 @@ type ApiParam struct {
 
 // ApiMethod describes an extracted method from the Discovery Document.
 type ApiMethod struct {
-	ID             string              `json:"id"`              // e.g. "bigquery.datasets.list"
-	Resource       string              `json:"resource"`        // e.g. "datasets"
-	Action         string              `json:"action"`          // e.g. "list"
+	ID             string              `json:"id"`       // e.g. "bigquery.datasets.list"
+	Resource       string              `json:"resource"` // e.g. "datasets"
+	Action         string              `json:"action"`   // e.g. "list"
 	Description    string              `json:"description"`
-	HTTPMethod     string              `json:"httpMethod"`      // "GET", "POST", etc.
-	Path           string              `json:"path"`            // URL path template
-	FlatPath       string              `json:"flatPath"`        // Simplified path template
+	HTTPMethod     string              `json:"httpMethod"` // "GET", "POST", etc.
+	Path           string              `json:"path"`       // URL path template
+	FlatPath       string              `json:"flatPath"`   // Simplified path template
 	Parameters     map[string]ApiParam `json:"parameters"`
 	ParameterOrder []string            `json:"parameterOrder"`
 }

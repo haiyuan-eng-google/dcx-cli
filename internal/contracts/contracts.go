@@ -14,7 +14,7 @@ import (
 // FlagContract describes a single flag on a command.
 type FlagContract struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`                  // "string", "bool", "int"
+	Type        string `json:"type"` // "string", "bool", "int"
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
 	Default     string `json:"default,omitempty"`
@@ -25,8 +25,8 @@ type FlagContract struct {
 // MCP tool schemas, and skill generation.
 type CommandContract struct {
 	ContractVersion string            `json:"contract_version"`
-	Command         string            `json:"command"`        // e.g. "dcx datasets list"
-	Domain          string            `json:"domain"`         // e.g. "bigquery", "spanner"
+	Command         string            `json:"command"` // e.g. "dcx datasets list"
+	Domain          string            `json:"domain"`  // e.g. "bigquery", "spanner"
 	Description     string            `json:"description"`
 	Flags           []FlagContract    `json:"flags"`
 	ExitCodes       map[string]string `json:"exit_codes"`
