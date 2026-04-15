@@ -4,7 +4,7 @@ An agent-native CLI for Google Cloud's Data Cloud, built in Go.
 One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker —
 with structured output, typed errors, and an MCP bridge for AI agents.
 
-> **Status:** Go MVP functional — 58 commands across 10 domains.
+> **Status:** Go MVP functional — 65 commands across 10 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
 > See [docs/benchmark_results_bigquery.md](docs/benchmark_results_bigquery.md)
 > for measured results.
@@ -51,14 +51,14 @@ dcx ca ask "revenue by region this quarter" --agent=sales-agent --project-id=myp
 dcx mcp serve
 ```
 
-## Commands (58 total)
+## Commands (65 total)
 
 | Surface | Commands |
 |---|---|
 | **BigQuery** | `datasets list/get`, `tables list/get`, `jobs list/get/query`, `models list/get`, `routines list/get` |
-| **Spanner** | `instances list/get`, `databases list/get/get-ddl`, `backups list/get`, `schema describe` |
-| **AlloyDB** | `clusters list/get`, `instances list/get`, `backups list/get`, `users list/get`, `databases list`, `schema describe` |
-| **Cloud SQL** | `instances list/get`, `databases list/get`, `backupRuns list/get`, `users list/get`, `flags list`, `tiers list`, `schema describe` |
+| **Spanner** | `instances list/get`, `databases list/get/get-ddl`, `backups list/get`, `databaseOperations list`, `instanceConfigs list/get`, `schema describe` |
+| **AlloyDB** | `clusters list/get`, `instances list/get`, `backups list/get`, `users list/get`, `operations list/get`, `databases list`, `schema describe` |
+| **Cloud SQL** | `instances list/get`, `databases list/get`, `backupRuns list/get`, `users list/get`, `operations list/get`, `flags list`, `tiers list`, `schema describe` |
 | **Looker** | `instances list/get`, `backups list/get`, `explores list`, `dashboards get` |
 | **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query` |
 | **Auth** | `auth status`, `auth check` |

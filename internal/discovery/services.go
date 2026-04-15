@@ -43,6 +43,9 @@ func SpannerConfig() *ServiceConfig {
 			"databases.getDdl",
 			"backups.list",
 			"backups.get",
+			"databaseOperations.list",
+			"instanceConfigs.list",
+			"instanceConfigs.get",
 		},
 		GlobalParamMappings: map[string]string{},
 	}
@@ -65,6 +68,8 @@ func AlloyDBConfig() *ServiceConfig {
 			"backups.get",
 			"users.list",
 			"users.get",
+			"operations.list",
+			"operations.get",
 		},
 		GlobalParamMappings: map[string]string{},
 	}
@@ -88,6 +93,8 @@ func CloudSQLConfig() *ServiceConfig {
 			"backupRuns.get",
 			"users.list",
 			"users.get",
+			"operations.list",
+			"operations.get",
 		},
 		GlobalParamMappings: map[string]string{
 			"project": "project-id",
