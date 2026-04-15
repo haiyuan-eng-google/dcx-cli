@@ -17,7 +17,7 @@ Cross-source command matrix for dcx v0.5.0.
 | `clusters list\|get` | — | — | Yes | — | — |
 | `databases list\|get` | — | Yes | — | Yes | — |
 | `databases insert\|delete` | — | — | — | Yes | — |
-| `databases create\|drop-database` | — | Yes | — | — | — |
+| `databases create\|drop-database\|update-ddl` | — | Yes | — | — | — |
 | `databases get-ddl` | — | Yes | — | — | — |
 | `backups list\|get` | — | Yes | Yes | — | Yes |
 | `backups create\|delete` | — | Yes | — | — | — |

@@ -102,6 +102,7 @@ func TestCommandDiscovery(t *testing.T) {
 		"dcx spanner databases list", "dcx spanner databases get",
 		"dcx spanner databases get-ddl", "dcx spanner schema describe",
 		"dcx spanner databases create", "dcx spanner databases drop-database",
+		"dcx spanner databases update-ddl",
 		"dcx spanner backups list", "dcx spanner backups get",
 		"dcx spanner backups create", "dcx spanner backups delete",
 		"dcx spanner database-operations list",
@@ -153,8 +154,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 78 {
-		t.Errorf("expected at least 78 commands, got %d", len(commands))
+	if len(commands) < 79 {
+		t.Errorf("expected at least 79 commands, got %d", len(commands))
 	}
 }
 
