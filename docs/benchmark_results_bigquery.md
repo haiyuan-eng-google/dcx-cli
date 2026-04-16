@@ -1,12 +1,12 @@
-# BigQuery CLI Benchmark Results: dcx vs bq
+# CLI Benchmark Results: dcx vs bq / gcloud
 
 Systematic latency, correctness, and token-efficiency comparison of `dcx`
-against the standard `bq` CLI across 12 BigQuery tasks covering metadata
-reads, SQL queries, dry-run validation, and error handling.
+against `bq` and `gcloud` CLIs across BigQuery and Spanner tasks covering
+metadata reads, SQL queries, mutations, dry-run validation, and error handling.
 
-## Current Results: Go dcx (v0.1.0)
+## BigQuery Baseline Results: Go dcx (v0.1.0)
 
-Run `20260413-163425-4e538fd` — Go implementation, 1 cold + 3 warm trials.
+Run `20260413-163425-4e538fd` — Go implementation, 12 BigQuery tasks, 1 cold + 3 warm trials.
 
 ### Key Numbers
 
@@ -198,24 +198,56 @@ This benchmark measures a specific, narrow slice:
 The results are directionally strong but should be validated on Linux CI
 hosts and with higher trial counts before quoting in external materials.
 
-### Expanded Surface (not yet benchmarked)
+## Expanded Surface Results (81-command run)
 
-Since the original 12-task benchmark was run, dcx has grown from 38 to 81
-commands. The following surfaces have benchmark task definitions but have
-not yet been measured:
+Run `20260416-122236-10be89e` (BigQuery) and `20260416-122724-10be89e`
+(Spanner). 1 cold + 3 warm trials each.
 
-| Surface | New tasks | Commands |
-|---|---|---|
-| **BigQuery** | jobs list, models list, routines list, mutation dry-runs | 10 new commands (jobs list/get, models list/get, routines list/get, datasets insert/delete, tables insert/delete) |
-| **Spanner** | backups list, instance-configs list, database-operations list, update-ddl dry-run | 10 new commands (databases create/drop/update-ddl, backups list/get/create/delete, databaseOperations list, instanceConfigs list/get) |
-| **Cloud SQL** | instances list, flags list, tiers list, operations list | 17 commands total (CRUD for databases + users, backupRuns, operations, flags, tiers) |
-| **AlloyDB** | (no benchmark infra yet) | 14 commands total |
-| **Looker** | (no benchmark infra yet) | 6 commands total |
+### BigQuery New Read Tasks
 
-Benchmark task files:
-- `benchmarks/tasks/bigquery_overlap.yaml` — updated with jobs/models/routines + mutation dry-runs
-- `benchmarks/tasks/spanner_overlap.yaml` — updated with backups/instance-configs/database-operations
-- `benchmarks/tasks/cloudsql_overlap.yaml` — new file for Cloud SQL parity tasks
+| Task | dcx p50 | bq p50 | Speedup | dcx | bq |
+|------|--------:|-------:|--------:|:---:|:--:|
+| List jobs | 606 ms | 2,635 ms | **4.3x** | PASS | PASS |
+| List models | 514 ms | 765 ms | **1.5x** | PASS | FAIL* |
+| List routines | 419 ms | 800 ms | **1.9x** | PASS | FAIL* |
+
+\* `bq ls --model` and `bq ls --routine` return empty output for the
+benchmark dataset. dcx returns the correct `{"items":[],"source":"BigQuery"}`
+envelope.
+
+### BigQuery Mutation Dry-Runs (dcx only)
+
+| Task | dcx p50 | Validation |
+|------|--------:|:----------:|
+| Dataset insert dry-run | 71 ms | PASS (method + URL + body) |
+| Dataset delete dry-run | 71 ms | PASS (method + URL + confirmation_required) |
+
+Dry-run validates locally (no network call) and completes in ~71 ms.
+
+### Spanner New Read Tasks
+
+| Task | dcx p50 | gcloud p50 | Speedup | dcx | gcloud |
+|------|--------:|-----------:|--------:|:---:|:------:|
+| List backups | 1,041 ms | 1,186 ms | **1.1x** | PASS | PASS |
+| List instance configs | 448 ms | 916 ms | **2.0x** | PASS | PASS |
+| List database operations | 1,223 ms | 1,318 ms | **1.1x** | PASS | PASS |
+
+Spanner parity reads average **1.5x faster** than `gcloud spanner`
+across all 7 measured tasks (6,275 ms vs 9,219 ms total).
+
+### Spanner DDL Dry-Run (dcx only)
+
+| Task | dcx p50 | Validation |
+|------|--------:|:----------:|
+| update-ddl dry-run | 71 ms | PASS (method + URL + body with statements) |
+
+### Not Yet Benchmarked
+
+| Surface | Status |
+|---|---|
+| **Cloud SQL** | Task definitions ready, no benchmark instance provisioned |
+| **AlloyDB** | Task definitions pending, no benchmark infra |
+| **Looker** | Task definitions pending, no benchmark infra |
 
 ## Architectural Factors (Inference)
 
@@ -269,12 +301,17 @@ unintended successful response instead of an error signal.
 
 ## Artifacts
 
-### Go run (current)
+### Expanded surface run (April 2026)
 
-- [Scorecard](../benchmarks/results/scorecards/20260413-163425-4e538fd.md)
+- [BigQuery scorecard (17 tasks)](../benchmarks/results/scorecards/20260416-122236-10be89e.md)
+- [Spanner scorecard (15 tasks)](../benchmarks/results/scorecards/20260416-122724-10be89e.md)
+
+### Baseline run (April 2026)
+
+- [BigQuery scorecard (12 tasks)](../benchmarks/results/scorecards/20260413-163425-4e538fd.md)
 
 Raw results (summary.json, results.ndjson, environment.json, per-trial
-stdout/stderr captures) are in `benchmarks/results/raw/20260413-163425-4e538fd/`
+stdout/stderr captures) are in `benchmarks/results/raw/<run-id>/`
 but gitignored. Reproduce locally with the instructions below.
 
 ### Reference
