@@ -4,7 +4,7 @@ An agent-native CLI for Google Cloud's Data Cloud, built in Go.
 One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker —
 with structured output, typed errors, and an MCP bridge for AI agents.
 
-> **Status:** Go MVP functional — 81 commands across 11 domains.
+> **Status:** Go MVP functional — 82 commands across 11 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
 > See [docs/benchmark_results_bigquery.md](docs/benchmark_results_bigquery.md)
 > for measured results.
@@ -54,7 +54,7 @@ source <(dcx completion bash)
 dcx mcp serve
 ```
 
-## Commands (81 total)
+## Commands (82 total)
 
 | Surface | Commands |
 |---|---|
@@ -66,7 +66,7 @@ dcx mcp serve
 | **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query` |
 | **Auth** | `auth status`, `auth check` |
 | **Profiles** | `profiles list`, `profiles validate`, `profiles test` |
-| **Introspection** | `meta commands`, `meta describe` |
+| **Introspection** | `meta commands`, `meta describe`, `meta generate-skills` |
 | **MCP** | `mcp serve` (JSON-RPC 2.0 / stdio, read-only, default `json-minified`) |
 | **Skills** | `dcx-bigquery`, `dcx-databases`, `dcx-looker`, `dcx-ca` (checked-in) |
 
@@ -75,7 +75,7 @@ Run `dcx meta commands` for the full machine-readable list.
 ### Deferred to P1
 
 - Agent Analytics SDK (12 commands, 6 evaluators)
-- `generate-skills`, Gemini manifest
+- Gemini manifest
 - Model Armor sanitization
 
 ## Output Format

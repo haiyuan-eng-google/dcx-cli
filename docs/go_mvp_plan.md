@@ -208,7 +208,7 @@ CLI can continue serving this surface during the Go migration.
 
 ### P1: Management and generation helpers
 
-- `generate-skills`
+- ~~`generate-skills`~~ — **shipped** (PR #24, as `meta generate-skills`)
 - Gemini manifest generation (`meta gemini-tools`)
 - ~~shell completions~~ — **shipped** (PR #15)
 - ~~`ca create-agent`, `ca list-agents`, `ca add-verified-query`~~ — **shipped** (PR #7)
@@ -717,7 +717,7 @@ The right message is:
 
 ## Implementation status
 
-All 6 phases are complete. The Go MVP is functional with 81 commands
+All 6 phases are complete. The Go MVP is functional with 82 commands
 across 11 domains, benchmarked at 5x faster than `bq`.
 
 | Phase | Status | PR |

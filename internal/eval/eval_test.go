@@ -137,7 +137,7 @@ func TestCommandDiscovery(t *testing.T) {
 		// Profiles
 		"dcx profiles list", "dcx profiles validate", "dcx profiles test",
 		// Meta
-		"dcx meta commands", "dcx meta describe",
+		"dcx meta commands", "dcx meta describe", "dcx meta generate-skills",
 		// MCP
 		"dcx mcp serve",
 		// Completion
@@ -155,8 +155,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 81 {
-		t.Errorf("expected at least 81 commands, got %d", len(commands))
+	if len(commands) < 82 {
+		t.Errorf("expected at least 82 commands, got %d", len(commands))
 	}
 }
 
