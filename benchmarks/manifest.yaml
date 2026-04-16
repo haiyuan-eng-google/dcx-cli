@@ -38,6 +38,14 @@ spanner_database: "bench-music"
 spanner_nonexistent_instance: "does-not-exist-instance-xyz"
 spanner_nonexistent_database: "does-not-exist-db-xyz"
 
+# ── Cloud SQL ────────────────────────────────────────────────────
+cloudsql_instance: "dcx-bench"
+cloudsql_database: "bench-db"
+
+# ── AlloyDB ─────────────────────────────────────────────────────
+alloydb_cluster: "dcx-bench"
+alloydb_location: "us-central1"
+
 # ── Profiles ─────────────────────────────────────────────────────────
 # Profile name for the dcx-profiles-test differentiated task.
 # Create ~/.config/dcx/profiles/bench.yaml (see benchmarks/README.md § Seed Data)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the benchmark suite.
 #
-# Usage: ./run_benchmarks.sh [--tasks bigquery_overlap|spanner_overlap|dcx_differentiated] [--trials N]
+# Usage: ./run_benchmarks.sh [--tasks bigquery_overlap|spanner_overlap|cloudsql_overlap|dcx_differentiated] [--trials N]
 #
 # Reads task specs from tasks/*.yaml, resolves placeholders from manifest.yaml,
 # executes each CLI variant, and writes raw results to results/raw/.

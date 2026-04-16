@@ -141,6 +141,109 @@ tasks:
           type: json_parse
     metrics: *standard_metrics
 
+  - id: bq-job-list
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: List recent jobs in the project
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx jobs list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: bq
+        command: >-
+          bq ls -j --format=json --project_id={project}
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: bq-model-list
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: List models in a dataset
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx models list
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: bq
+        command: >-
+          bq ls --format=json --model {project}:{bq_benchmark_dataset}
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: bq-routine-list
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: List routines in a dataset
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx routines list
+          --project-id {project}
+          --dataset-id {bq_benchmark_dataset}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: bq
+        command: >-
+          bq ls --format=json --routine {project}:{bq_benchmark_dataset}
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  # ── Mutation dry-run tasks ──────────────────────────────────────────
+
+  - id: bq-dataset-insert-dryrun
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Dry-run dataset creation to validate body and URL
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets insert
+          --project-id {project}
+          --body '{"datasetReference":{"datasetId":"dryrun_test"},"location":"US"}'
+          --dry-run
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [method, url, body]
+    metrics: *standard_metrics
+
+  - id: bq-dataset-delete-dryrun
+    track: parity
+    system: bigquery
+    dataset_tier: small
+    goal: Dry-run dataset deletion to validate URL and confirmation
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx datasets delete
+          --project-id {project}
+          --dataset-id {bq_nonexistent_dataset}
+          --dry-run
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [method, url, confirmation_required]
+    metrics: *standard_metrics
+
   # ── Query tasks ──────────────────────────────────────────────────────
 
   - id: bq-dryrun-aggregate

@@ -1,6 +1,6 @@
 # dcx CLI Benchmark Suite
 
-Systematic benchmark comparing `dcx` against `bq` and `gcloud spanner` CLIs.
+Systematic benchmark comparing `dcx` against `bq`, `gcloud spanner`, and `gcloud sql` CLIs.
 
 > **Carried over from [bqx-cli](https://github.com/haiyuan-eng-google/bqx-cli).**
 > Task specs, runner, and scorer are ready to use. The benchmark suite
@@ -68,8 +68,9 @@ python3 scripts/score_results.py results/raw/<run-id>
 benchmarks/
   manifest.yaml              # Environment bindings ({project}, {dataset}, etc.)
   tasks/
-    bigquery_overlap.yaml     # 12 BigQuery parity tasks
-    spanner_overlap.yaml      # 11 Spanner parity tasks
+    bigquery_overlap.yaml     # 17 BigQuery parity tasks (reads + mutations dry-run)
+    spanner_overlap.yaml      # 15 Spanner parity tasks (reads + DDL dry-run)
+    cloudsql_overlap.yaml     #  4 Cloud SQL parity tasks
     dcx_differentiated.yaml   #  8 dcx-only differentiated tasks
   data/
     bigquery/seed.sql         # BigQuery seed data (Tier D private tables)
@@ -98,8 +99,9 @@ benchmarks/
 
 | Track | Tasks | CLIs Compared |
 |-------|-------|---------------|
-| BigQuery parity | 12 | dcx vs bq |
-| Spanner parity | 11 | dcx vs gcloud spanner |
+| BigQuery parity | 17 | dcx vs bq |
+| Spanner parity | 15 | dcx vs gcloud spanner |
+| Cloud SQL parity | 4 | dcx vs gcloud sql |
 | dcx differentiated | 8 | dcx only |
 
 See the task YAML files for full specifications.

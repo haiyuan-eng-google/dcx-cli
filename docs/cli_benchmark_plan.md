@@ -28,8 +28,9 @@ Use two scoreboards:
 
 - **Parity benchmark**
   Compare only overlapping surfaces:
-  - BigQuery dataset/table/query tasks
-  - Spanner instance/database/DDL/query tasks
+  - BigQuery dataset/table/query/jobs/models/routines tasks
+  - Spanner instance/database/DDL/backup/instance-config tasks
+  - Cloud SQL instance/database/flags/tiers/operations tasks
 - **Differentiated benchmark**
   Measure `dcx` features that `bq` and Spanner CLI do not really have:
   - `meta commands`

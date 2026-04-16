@@ -115,6 +115,99 @@ tasks:
           type: json_parse
     metrics: *standard_metrics
 
+  - id: sp-backup-list
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: List backups for a Spanner instance
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner backups list
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud spanner backups list
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: sp-instance-configs-list
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: List available Spanner instance configurations
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner instance-configs list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud spanner instance-configs list
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: sp-database-operations-list
+    track: parity
+    system: spanner
+    dataset_tier: small
+    goal: List database operations for a Spanner instance
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner database-operations list
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud spanner operations list
+          --instance={spanner_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: sp-update-ddl-dryrun
+    track: differentiated
+    system: spanner
+    dataset_tier: small
+    goal: Dry-run DDL update to validate statements and URL
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx spanner databases update-ddl
+          --project-id {project}
+          --instance-id {spanner_instance}
+          --database-id {spanner_database}
+          --ddl "CREATE TABLE bench_test (id INT64) PRIMARY KEY (id)"
+          --dry-run
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [method, url, body]
+    metrics: *standard_metrics
+
   # ── SQL tasks (baseline-only, dcx N/A) ──────────────────────────────
 
   - id: sp-query-simple

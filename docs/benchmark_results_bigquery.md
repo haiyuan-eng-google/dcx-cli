@@ -198,6 +198,25 @@ This benchmark measures a specific, narrow slice:
 The results are directionally strong but should be validated on Linux CI
 hosts and with higher trial counts before quoting in external materials.
 
+### Expanded Surface (not yet benchmarked)
+
+Since the original 12-task benchmark was run, dcx has grown from 38 to 81
+commands. The following surfaces have benchmark task definitions but have
+not yet been measured:
+
+| Surface | New tasks | Commands |
+|---|---|---|
+| **BigQuery** | jobs list, models list, routines list, mutation dry-runs | 10 new commands (jobs list/get, models list/get, routines list/get, datasets insert/delete, tables insert/delete) |
+| **Spanner** | backups list, instance-configs list, database-operations list, update-ddl dry-run | 10 new commands (databases create/drop/update-ddl, backups list/get/create/delete, databaseOperations list, instanceConfigs list/get) |
+| **Cloud SQL** | instances list, flags list, tiers list, operations list | 17 commands total (CRUD for databases + users, backupRuns, operations, flags, tiers) |
+| **AlloyDB** | (no benchmark infra yet) | 14 commands total |
+| **Looker** | (no benchmark infra yet) | 6 commands total |
+
+Benchmark task files:
+- `benchmarks/tasks/bigquery_overlap.yaml` — updated with jobs/models/routines + mutation dry-runs
+- `benchmarks/tasks/spanner_overlap.yaml` — updated with backups/instance-configs/database-operations
+- `benchmarks/tasks/cloudsql_overlap.yaml` — new file for Cloud SQL parity tasks
+
 ## Architectural Factors (Inference)
 
 The sections above report measured results. This section offers an
@@ -239,12 +258,14 @@ unintended successful response instead of an error signal.
 
 ## Next Steps
 
+- Rerun benchmarks with expanded task suite (BigQuery jobs/models/routines, Spanner backups/configs, Cloud SQL)
 - Update query/dry-run validation specs to match Go output shape
 - Rerun on a Linux CI host (GitHub Actions runner) to confirm the speedup
   is not macOS-specific
 - Increase warm trials to 10+ for statistical claims
 - Add field filtering to reduce Go token cost to Rust-level or below
 - Rerun with a genuinely restricted project for the permission-denied task
+- Add mutation latency benchmarks (dry-run + live create/delete round-trips)
 
 ## Artifacts
 

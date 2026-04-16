@@ -32,7 +32,7 @@ tasks:
     cli_variants:
       - name: dcx
         command: >-
-          dcx meta describe analytics evaluate --format json
+          dcx meta describe spanner databases update-ddl --format json
     validation:
       type: json_keys
       expected_keys: [contract_version, command, flags, exit_codes]

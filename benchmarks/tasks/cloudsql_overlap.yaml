@@ -1,0 +1,107 @@
+# Cloud SQL parity tasks — dcx vs gcloud sql CLI.
+#
+# Placeholders like {project} are resolved from manifest.yaml at runtime.
+
+tasks:
+  # ── Read tasks ───────────────────────────────────────────────────────
+
+  - id: csql-instance-list
+    track: parity
+    system: cloudsql
+    dataset_tier: small
+    goal: List Cloud SQL instances in the project
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx cloudsql instances list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud sql instances list
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: &standard_metrics
+      - exit_code
+      - wall_clock_ms
+      - stdout_bytes
+      - stderr_bytes
+      - token_input_estimate
+      - token_output_estimate
+
+  - id: csql-flags-list
+    track: parity
+    system: cloudsql
+    dataset_tier: small
+    goal: List available Cloud SQL flags
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx cloudsql flags list
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud sql flags list
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: csql-tiers-list
+    track: parity
+    system: cloudsql
+    dataset_tier: small
+    goal: List available Cloud SQL tiers
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx cloudsql tiers list
+          --project-id {project}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud sql tiers list
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
+
+  - id: csql-operations-list
+    track: parity
+    system: cloudsql
+    dataset_tier: small
+    goal: List Cloud SQL operations for an instance
+    note: >-
+      The Cloud SQL API requires --instance even though the Discovery
+      doc marks it optional. Both variants pass --instance.
+    cli_variants:
+      - name: dcx
+        command: >-
+          dcx cloudsql operations list
+          --project-id {project}
+          --instance {cloudsql_instance}
+          --format json
+        validation:
+          type: json_keys
+          expected_keys: [items, source]
+      - name: gcloud
+        command: >-
+          gcloud sql operations list
+          --instance={cloudsql_instance}
+          --project={project}
+          --format=json
+        validation:
+          type: json_parse
+    metrics: *standard_metrics
