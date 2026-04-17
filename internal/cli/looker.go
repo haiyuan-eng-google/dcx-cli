@@ -53,7 +53,7 @@ func (a *App) addExploresListCmd(parent *cobra.Command) {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 	cmd.Flags().StringVar(&profileName, "profile", "", "Looker profile name or path (required)")
@@ -101,7 +101,7 @@ func (a *App) addDashboardsGetCmd(parent *cobra.Command) {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 	cmd.Flags().StringVar(&profileName, "profile", "", "Looker profile name or path (required)")

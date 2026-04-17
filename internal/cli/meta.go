@@ -44,9 +44,9 @@ func (a *App) metaCommandsCmd() *cobra.Command {
 						"description": s.Description,
 					}
 				}
-				return output.Render(format, rows)
+				return a.Render(format, rows)
 			default:
-				return output.Render(format, summaries)
+				return a.Render(format, summaries)
 			}
 		},
 	}
@@ -82,9 +82,9 @@ func (a *App) metaDescribeCmd() *cobra.Command {
 					"supports_dry_run": contract.SupportsDryRun,
 					"is_mutation":      contract.IsMutation,
 				}
-				return output.Render(format, kv)
+				return a.Render(format, kv)
 			default:
-				return output.Render(format, contract)
+				return a.Render(format, contract)
 			}
 		},
 	}

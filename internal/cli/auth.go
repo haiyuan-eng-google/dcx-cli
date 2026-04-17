@@ -51,14 +51,14 @@ func (a *App) authCheckCmd() *cobra.Command {
 
 			if !result.Authenticated {
 				// Write result then exit with auth error code.
-				if renderErr := output.Render(format, result); renderErr != nil {
+				if renderErr := a.Render(format, result); renderErr != nil {
 					dcxerrors.Emit(dcxerrors.Internal, renderErr.Error(), "")
 				}
 				dcxerrors.Emit(dcxerrors.AuthError, "Authentication failed: "+result.Error, "Run 'dcx auth login' or set DCX_TOKEN")
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 }
@@ -76,7 +76,7 @@ func (a *App) authStatusCmd() *cobra.Command {
 
 			ctx := context.Background()
 			result := auth.Check(ctx, a.AuthConfig())
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 }

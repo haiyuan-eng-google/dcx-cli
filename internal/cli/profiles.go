@@ -69,7 +69,7 @@ func (a *App) profilesListCmd() *cobra.Command {
 				"count":        len(all),
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 }
@@ -113,7 +113,7 @@ func (a *App) profilesValidateCmd() *cobra.Command {
 				"count":     len(results),
 			}
 
-			if err := output.Render(format, result); err != nil {
+			if err := a.Render(format, result); err != nil {
 				return err
 			}
 
@@ -185,7 +185,7 @@ func (a *App) profilesTestCmd() *cobra.Command {
 				"count":      len(results),
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 }

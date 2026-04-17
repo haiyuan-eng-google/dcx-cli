@@ -13,7 +13,6 @@ import (
 	"github.com/haiyuan-eng-google/dcx-cli/internal/auth"
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
 	dcxerrors "github.com/haiyuan-eng-google/dcx-cli/internal/errors"
-	"github.com/haiyuan-eng-google/dcx-cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -111,7 +110,7 @@ Examples:
 
 			// Dry-run: show what would be sent.
 			if a.Opts.DryRun {
-				return output.Render(format, map[string]interface{}{
+				return a.Render(format, map[string]interface{}{
 					"method":                "PATCH",
 					"url":                   apiURL,
 					"body":                  body,
@@ -173,7 +172,7 @@ Examples:
 				return nil
 			}
 
-			return output.Render(format, raw)
+			return a.Render(format, raw)
 		},
 	}
 

@@ -113,6 +113,11 @@ func (a *App) OutputFormat() (output.Format, error) {
 	return output.ParseFormat(a.Opts.Format)
 }
 
+// Render outputs a value using the configured format and field filtering.
+func (a *App) Render(format output.Format, value interface{}) error {
+	return output.RenderFiltered(format, value, a.Opts.OutputFields)
+}
+
 // AuthConfig returns an auth.Config from the current global flags.
 func (a *App) AuthConfig() auth.Config {
 	return auth.Config{

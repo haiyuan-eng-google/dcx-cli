@@ -135,6 +135,7 @@ func GlobalFlags() []FlagContract {
 		{Name: "location", Type: "string", Description: "Google Cloud location/region"},
 		{Name: "token", Type: "string", Description: "Bearer access token (overrides all other auth)"},
 		{Name: "credentials-file", Type: "string", Description: "Path to service account JSON credentials file"},
+		{Name: "output-fields", Type: "string", Description: "Comma-separated list of fields to include in output"},
 	}
 }
 

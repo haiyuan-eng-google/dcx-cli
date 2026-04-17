@@ -144,7 +144,7 @@ func (a *App) caAskCmd() *cobra.Command {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 
@@ -226,7 +226,7 @@ func (a *App) caCreateAgentCmd() *cobra.Command {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 
@@ -275,7 +275,7 @@ func (a *App) caListAgentsCmd() *cobra.Command {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 }
@@ -336,7 +336,7 @@ func (a *App) caAddVerifiedQueryCmd() *cobra.Command {
 				return nil
 			}
 
-			return output.Render(format, result)
+			return a.Render(format, result)
 		},
 	}
 

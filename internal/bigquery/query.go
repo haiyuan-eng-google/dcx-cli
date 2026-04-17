@@ -83,6 +83,7 @@ func ExecuteQuery(
 	dryRun bool,
 	maxResults int,
 	format output.Format,
+	outputFields string,
 ) error {
 	if projectID == "" {
 		dcxerrors.Emit(dcxerrors.MissingArgument, "required flag --project-id is missing", "")
@@ -170,5 +171,5 @@ func ExecuteQuery(
 		return nil
 	}
 
-	return output.Render(format, raw)
+	return output.RenderFiltered(format, raw, outputFields)
 }

@@ -141,7 +141,7 @@ func (a *App) schemaDescribeRunE(profileName *string, sourceType profiles.Source
 			return nil
 		}
 
-		return output.Render(format, result)
+		return a.Render(format, result)
 	}
 }
 
@@ -178,7 +178,7 @@ func (a *App) databasesListRunE(profileName *string, sourceType profiles.SourceT
 			return nil
 		}
 
-		return output.Render(format, result)
+		return a.Render(format, result)
 	}
 }
 

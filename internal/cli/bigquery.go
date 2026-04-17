@@ -61,6 +61,7 @@ func (a *App) registerJobsQueryCommand() {
 				a.Opts.DryRun,
 				maxResults,
 				format,
+				a.Opts.OutputFields,
 			)
 		},
 	}
