@@ -172,7 +172,17 @@ func renderSkill(domain string, cmds []*contracts.CommandContract) string {
 			b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", c.Command, desc, mutFlags))
 		}
 		b.WriteString("\n")
-		b.WriteString("All mutation commands support `--dry-run` to preview the request without executing.\n\n")
+		// Only mention dry-run if at least one mutation supports it.
+		hasDryRun := false
+		for _, c := range mutations {
+			if c.SupportsDryRun {
+				hasDryRun = true
+				break
+			}
+		}
+		if hasDryRun {
+			b.WriteString("Mutations marked with `--dry-run` support previewing the request without executing.\n\n")
+		}
 	}
 
 	// Flag reference for commands with non-global flags.
@@ -195,14 +205,38 @@ func renderSkill(domain string, cmds []*contracts.CommandContract) string {
 		b.WriteString("\n")
 	}
 
-	// Decision rules.
+	// Decision rules — derived from actual contracts, not hardcoded.
 	b.WriteString("## Decision rules\n\n")
-	b.WriteString(fmt.Sprintf("- All %s commands require `--project-id` (or `DCX_PROJECT`)\n", domainTitle))
+	if domainRequiresProjectID(domain, cmds) {
+		b.WriteString(fmt.Sprintf("- All %s commands require `--project-id` (or `DCX_PROJECT`)\n", domainTitle))
+	}
 	b.WriteString("- Use `--format json` for automation, `--format table` for visual scanning\n")
 	if len(mutations) > 0 {
-		b.WriteString("- Mutation commands require `--body` (POST) or `--force` (DELETE)\n")
-		b.WriteString("- Use `--dry-run` to preview mutations before executing\n")
-		b.WriteString("- DELETE commands require `--force` in non-interactive environments\n")
+		hasDryRun := false
+		hasBody := false
+		hasForce := false
+		for _, c := range mutations {
+			if c.SupportsDryRun {
+				hasDryRun = true
+			}
+			for _, f := range c.Flags {
+				if f.Name == "body" {
+					hasBody = true
+				}
+				if f.Name == "force" {
+					hasForce = true
+				}
+			}
+		}
+		if hasBody {
+			b.WriteString("- POST/PATCH mutations require `--body` (JSON string or `@file.json`)\n")
+		}
+		if hasForce {
+			b.WriteString("- DELETE commands require `--force` in non-interactive environments\n")
+		}
+		if hasDryRun {
+			b.WriteString("- Use `--dry-run` to preview mutations before executing\n")
+		}
 	}
 	b.WriteString("- Use `dcx meta describe <command>` for the full contract of any command\n")
 
@@ -250,6 +284,31 @@ func mutationFlagSummary(c *contracts.CommandContract) string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// domainRequiresProjectID checks if all commands in a domain actually use
+// --project-id. Returns false for domains like auth and profiles where
+// commands work without it.
+func domainRequiresProjectID(domain string, cmds []*contracts.CommandContract) bool {
+	switch domain {
+	case "auth", "profiles":
+		return false
+	}
+	// Check if any command has project-id as a required flag.
+	for _, c := range cmds {
+		for _, f := range c.Flags {
+			if f.Name == "project-id" && f.Required {
+				return true
+			}
+		}
+	}
+	// Default true for data domains even if flag isn't marked required
+	// (global flags are typically not marked required in contracts).
+	switch domain {
+	case "bigquery", "spanner", "alloydb", "cloudsql", "looker":
+		return true
+	}
+	return false
 }
 
 func nonGlobalFlags(c *contracts.CommandContract) []contracts.FlagContract {
