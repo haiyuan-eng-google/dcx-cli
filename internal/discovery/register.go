@@ -21,6 +21,7 @@ type CLIOpts struct {
 	Token           *string
 	CredentialsFile *string
 	DryRun          *bool
+	OutputFields    *string
 }
 
 // RegisterCommands parses a Discovery Document and registers all allowed
@@ -135,6 +136,10 @@ func registerOneCommand(
 			authCfg := auth.Config{
 				Token:           *opts.Token,
 				CredentialsFile: *opts.CredentialsFile,
+			}
+
+			if opts.OutputFields != nil {
+				executor.OutputFields = *opts.OutputFields
 			}
 
 			return executor.Execute(

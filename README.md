@@ -6,7 +6,7 @@ with structured output, typed errors, and an MCP bridge for AI agents.
 
 > **Status:** Go MVP functional — 82 commands across 11 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
-> See [docs/benchmark_results_bigquery.md](docs/benchmark_results_bigquery.md)
+> See [docs/benchmark_results.md](docs/benchmark_results.md)
 > for measured results.
 
 ## Why dcx
@@ -126,7 +126,7 @@ Measured on the BigQuery 12-task parity suite (Go `dcx` vs `bq`):
 | **6-step workflow** | **3.2s** | **3.2s** | 15.7s |
 | **Workflow tokens** | ~3,241 | **~2,239** | ~2,115 |
 
-See [docs/benchmark_results_bigquery.md](docs/benchmark_results_bigquery.md)
+See [docs/benchmark_results.md](docs/benchmark_results.md)
 for the full breakdown including per-task results, token efficiency analysis,
 and Go vs Rust comparison.
 

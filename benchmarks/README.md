@@ -6,7 +6,7 @@ Systematic benchmark comparing `dcx` against `bq`, `gcloud spanner`, and `gcloud
 > Task specs, runner, and scorer are ready to use. The benchmark suite
 > becomes runnable once the Go command surface is implemented. Reference
 > results from the Rust implementation are in
-> [docs/benchmark_results_bigquery.md](../docs/benchmark_results_bigquery.md).
+> [docs/benchmark_results.md](../docs/benchmark_results.md).
 
 See [docs/cli_benchmark_plan.md](../docs/cli_benchmark_plan.md) for the full
 design rationale, scoring model, and success criteria.

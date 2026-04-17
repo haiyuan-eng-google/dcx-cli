@@ -93,5 +93,6 @@ func (a *App) discoveryOpts() *discovery.CLIOpts {
 		Token:           &a.Opts.Token,
 		CredentialsFile: &a.Opts.CredentialsFile,
 		DryRun:          &a.Opts.DryRun,
+		OutputFields:    &a.Opts.OutputFields,
 	}
 }

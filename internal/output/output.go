@@ -54,6 +54,19 @@ func FormatNames() []string {
 // For Table, value should be a slice of maps or structs (rendered as rows).
 // For Text, value is printed via fmt.Println.
 func Render(format Format, value interface{}) error {
+	return RenderFiltered(format, value, "")
+}
+
+// RenderFiltered writes value to stdout, filtering to only include the
+// specified fields. If fields is empty, renders the full value.
+func RenderFiltered(format Format, value interface{}, fields string) error {
+	if fields != "" {
+		value = FilterFields(value, fields)
+	}
+	return renderUnfiltered(format, value)
+}
+
+func renderUnfiltered(format Format, value interface{}) error {
 	switch format {
 	case JSON:
 		return renderJSON(value, true)

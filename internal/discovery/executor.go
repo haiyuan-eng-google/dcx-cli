@@ -23,7 +23,8 @@ type ListEnvelope struct {
 
 // Executor runs Discovery-generated commands.
 type Executor struct {
-	HTTPClient *http.Client
+	HTTPClient   *http.Client
+	OutputFields string // comma-separated fields to include in output
 }
 
 // NewExecutor creates an Executor with the given HTTP client.
@@ -111,10 +112,10 @@ func (e *Executor) Execute(
 	// Wrap in normalized envelope for list commands.
 	if cmd.Method.Action == "list" {
 		envelope := normalizeListResponse(raw, cmd.Service.Domain)
-		return output.Render(format, envelope)
+		return output.RenderFiltered(format, envelope, e.OutputFields)
 	}
 
-	return output.Render(format, raw)
+	return output.RenderFiltered(format, raw, e.OutputFields)
 }
 
 // executePageAll fetches all pages and combines results.
@@ -182,7 +183,7 @@ func (e *Executor) executePageAll(
 		Items:  allItems,
 		Source: sourceName(cmd.Service.Domain),
 	}
-	return output.Render(format, envelope)
+	return output.RenderFiltered(format, envelope, e.OutputFields)
 }
 
 // normalizeListResponse wraps raw API responses in the dcx list envelope.

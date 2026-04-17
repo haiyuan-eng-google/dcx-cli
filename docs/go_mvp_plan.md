@@ -320,7 +320,7 @@ Copy these from `bqx-cli` into `dcx-cli` early:
 
 Also copy or regenerate:
 
-- `docs/benchmark_results_bigquery.md` (3-CLI comparison with measured data)
+- `docs/benchmark_results.md` (3-CLI comparison with measured data)
 - `docs/cli_benchmark_plan.md` (methodology and scoring model)
 
 ### Required benchmark tracks in the Go repo
@@ -693,7 +693,7 @@ From `bqx-cli` to `dcx-cli`:
 
 ```
 benchmarks/                          # full directory
-docs/benchmark_results_bigquery.md
+docs/benchmark_results.md
 docs/cli_benchmark_plan.md
 docs/dcx-vs-bq.md
 docs/source-matrix.md

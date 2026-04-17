@@ -21,6 +21,7 @@ type GlobalOpts struct {
 	Token           string
 	CredentialsFile string
 	DryRun          bool
+	OutputFields    string
 }
 
 // App holds the assembled CLI application state.
@@ -55,6 +56,7 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	pf.StringVar(&opts.Token, "token", "", "Bearer access token (overrides all other auth)")
 	pf.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to service account JSON credentials file")
 	pf.BoolVar(&opts.DryRun, "dry-run", false, "Validate and show what would be sent without executing")
+	pf.StringVar(&opts.OutputFields, "output-fields", "", "Comma-separated list of fields to include in output (e.g., name,schema)")
 
 	app := &App{
 		Root:     root,
