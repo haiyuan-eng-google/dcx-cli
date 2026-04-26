@@ -346,9 +346,9 @@ func TestExtractItemsDynamic(t *testing.T) {
 			want: 1,
 		},
 		{
-			name: "no array returns raw as single item",
+			name: "no array returns empty for list responses",
 			raw:  map[string]interface{}{"name": "projects/x/databases/y"},
-			want: 1,
+			want: 0,
 		},
 	}
 

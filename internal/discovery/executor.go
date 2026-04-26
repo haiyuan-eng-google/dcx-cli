@@ -265,8 +265,9 @@ func extractItems(raw map[string]interface{}) []interface{} {
 		}
 	}
 
-	// Nothing found — return the raw response as a single item.
-	return []interface{}{raw}
+	// Nothing found — return empty. This happens when the API returns
+	// an empty list (e.g., {} with no items key for models/routines).
+	return []interface{}{}
 }
 
 func sourceName(domain string) string {
