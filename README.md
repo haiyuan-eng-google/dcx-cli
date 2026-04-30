@@ -4,7 +4,7 @@ An agent-native CLI for Google Cloud's Data Cloud, built in Go.
 One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker —
 with structured output, typed errors, and an MCP bridge for AI agents.
 
-> **Status:** Go MVP functional — 84 commands across 11 domains.
+> **Status:** Go MVP functional — 86 commands across 11 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
 > See [docs/benchmark_results.md](docs/benchmark_results.md)
 > for measured results.
@@ -54,7 +54,7 @@ source <(dcx completion bash)
 dcx mcp serve
 ```
 
-## Commands (84 total)
+## Commands (86 total)
 
 | Surface | Commands |
 |---|---|
@@ -63,10 +63,10 @@ dcx mcp serve
 | **AlloyDB** | `clusters list/get`, `instances list/get`, `backups list/get`, `users list/get/create/delete`, `operations list/get`, `databases list`, `schema describe` |
 | **Cloud SQL** | `instances list/get`, `databases list/get/insert/delete`, `backupRuns list/get`, `users list/get/insert/delete`, `operations list/get`, `flags list`, `tiers list`, `schema describe` |
 | **Looker** | `instances list/get`, `backups list/get`, `explores list`, `dashboards get` |
-| **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query` |
+| **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query`, `ca delete-agent` |
 | **Auth** | `auth status`, `auth check` |
 | **Profiles** | `profiles list`, `profiles validate`, `profiles test` |
-| **Introspection** | `meta commands`, `meta describe`, `meta generate-skills` |
+| **Introspection** | `meta commands`, `meta describe`, `meta generate-skills`, `meta schema` |
 | **MCP** | `mcp serve` (JSON-RPC 2.0 / stdio, read-only, default `json-minified`) |
 | **Skills** | `dcx-bigquery`, `dcx-databases`, `dcx-looker`, `dcx-ca` (checked-in) |
 
