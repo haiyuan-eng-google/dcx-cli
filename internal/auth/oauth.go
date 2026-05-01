@@ -61,7 +61,7 @@ func Login(ctx context.Context) (*oauth2.Token, error) {
 		return nil, fmt.Errorf("starting local server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	config.RedirectURL = fmt.Sprintf("http://localhost:%d", port)
+	config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	// Generate the auth URL.
 	state := fmt.Sprintf("dcx-%d", time.Now().UnixNano())
