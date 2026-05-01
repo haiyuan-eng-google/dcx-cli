@@ -14,12 +14,16 @@ import (
 
 // replContext holds session state across REPL commands.
 type replContext struct {
-	ProjectID string
-	DatasetID string
-	Location  string
-	Profile   string
-	Agent     string
-	Format    string // session output format (default: text)
+	ProjectID       string
+	DatasetID       string
+	Location        string
+	Profile         string
+	Agent           string
+	Format          string // session output format (default: text)
+	Token           string // forwarded from parent --token
+	CredentialsFile string // forwarded from parent --credentials-file
+	Retry           int    // forwarded from parent --retry
+	OutputFields    string // forwarded from parent --output-fields
 }
 
 // blockedCommands are interactive/server commands that shouldn't run in the REPL.
@@ -71,10 +75,14 @@ func runREPL(app *App) error {
 	}
 
 	ctx := replContext{
-		ProjectID: app.Opts.ProjectID,
-		DatasetID: app.Opts.DatasetID,
-		Location:  app.Opts.Location,
-		Format:    "text", // human-readable default for REPL
+		ProjectID:       app.Opts.ProjectID,
+		DatasetID:       app.Opts.DatasetID,
+		Location:        app.Opts.Location,
+		Token:           app.Opts.Token,
+		CredentialsFile: app.Opts.CredentialsFile,
+		Retry:           app.Opts.Retry,
+		OutputFields:    app.Opts.OutputFields,
+		Format:          "text", // human-readable default for REPL
 	}
 
 	line := liner.NewLiner()
@@ -406,6 +414,9 @@ func injectContext(args []string, ctx replContext, app *App) []string {
 		result = append(result, "--agent", ctx.Agent)
 	}
 
+	// Always forward auth/config globals (these are accepted by all commands).
+	result = appendAuthAndConfigFlags(result, ctx, present)
+
 	return result
 }
 
@@ -419,6 +430,24 @@ func injectGlobalContext(args []string, ctx replContext) []string {
 	}
 	if ctx.Location != "" && !present["location"] {
 		args = append(args, "--location", ctx.Location)
+	}
+	args = appendAuthAndConfigFlags(args, ctx, present)
+	return args
+}
+
+// appendAuthAndConfigFlags forwards auth/config globals to subprocess commands.
+func appendAuthAndConfigFlags(args []string, ctx replContext, present map[string]bool) []string {
+	if ctx.Token != "" && !present["token"] {
+		args = append(args, "--token", ctx.Token)
+	}
+	if ctx.CredentialsFile != "" && !present["credentials-file"] {
+		args = append(args, "--credentials-file", ctx.CredentialsFile)
+	}
+	if ctx.Retry > 0 && !present["retry"] {
+		args = append(args, "--retry", fmt.Sprintf("%d", ctx.Retry))
+	}
+	if ctx.OutputFields != "" && !present["output-fields"] {
+		args = append(args, "--output-fields", ctx.OutputFields)
 	}
 	return args
 }
