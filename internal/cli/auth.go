@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/auth"
@@ -19,6 +21,8 @@ func (a *App) addAuthCommands() {
 
 	authCmd.AddCommand(a.authCheckCmd())
 	authCmd.AddCommand(a.authStatusCmd())
+	authCmd.AddCommand(a.authLoginCmd())
+	authCmd.AddCommand(a.authLogoutCmd())
 
 	a.Root.AddCommand(authCmd)
 
@@ -31,6 +35,16 @@ func (a *App) addAuthCommands() {
 	a.Registry.Register(contracts.BuildContract(
 		"auth status", "auth",
 		"Show current authentication status",
+		nil, false, false,
+	))
+	a.Registry.Register(contracts.BuildContract(
+		"auth login", "auth",
+		"Log in via OAuth2 browser flow and store credentials",
+		nil, false, false,
+	))
+	a.Registry.Register(contracts.BuildContract(
+		"auth logout", "auth",
+		"Remove stored OAuth2 credentials",
 		nil, false, false,
 	))
 }
@@ -59,6 +73,63 @@ func (a *App) authCheckCmd() *cobra.Command {
 			}
 
 			return a.Render(format, result)
+		},
+	}
+}
+
+func (a *App) authLoginCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "login",
+		Short: "Log in via OAuth2 browser flow and store credentials",
+		Long: `Opens a browser for Google OAuth2 authorization. After consent,
+stores a refresh token in ~/.config/dcx/credentials.json.
+
+Subsequent dcx commands will use this token automatically
+(Tier 3 in the auth resolution chain, after --token and
+--credentials-file but before ADC).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			token, err := auth.Login(ctx)
+			if err != nil {
+				dcxerrors.Emit(dcxerrors.AuthError, err.Error(), "")
+				return nil
+			}
+
+			fmt.Fprintf(os.Stderr, "Logged in successfully. Credentials saved to ~/.config/dcx/credentials.json\n")
+			fmt.Fprintf(os.Stderr, "Token expires: %s\n", token.Expiry.Format("2006-01-02 15:04:05"))
+
+			format, fmtErr := a.OutputFormat()
+			if fmtErr != nil {
+				return nil
+			}
+			return a.Render(format, map[string]interface{}{
+				"authenticated": true,
+				"method":        "oauth_login",
+				"source":        "~/.config/dcx/credentials.json",
+			})
+		},
+	}
+}
+
+func (a *App) authLogoutCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Remove stored OAuth2 credentials",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := auth.Logout(); err != nil {
+				dcxerrors.Emit(dcxerrors.Internal, err.Error(), "")
+				return nil
+			}
+
+			fmt.Fprintf(os.Stderr, "Logged out. Stored credentials removed.\n")
+
+			format, fmtErr := a.OutputFormat()
+			if fmtErr != nil {
+				return nil
+			}
+			return a.Render(format, map[string]interface{}{
+				"logged_out": true,
+			})
 		},
 	}
 }
