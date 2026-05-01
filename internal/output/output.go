@@ -97,6 +97,11 @@ func renderJSON(value interface{}, pretty bool) error {
 }
 
 func renderTable(value interface{}) error {
+	// Try BQ query result format first.
+	if renderBQQueryTable(value) {
+		return nil
+	}
+
 	rows, headers, err := extractTableData(value)
 	if err != nil {
 		return err
@@ -232,6 +237,11 @@ func toStringMap(v interface{}) (map[string]interface{}, bool) {
 }
 
 func renderText(value interface{}) error {
+	// Try BQ query result format first.
+	if renderBQQueryText(value) {
+		return nil
+	}
+
 	switch v := value.(type) {
 	case string:
 		fmt.Fprintln(os.Stdout, Sanitize(v))
@@ -316,4 +326,178 @@ func formatScalar(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// isBQQueryResult checks if value has the BigQuery query response shape:
+// {"rows": [...], "schema": {"fields": [...]}, "totalRows": "N"}
+func isBQQueryResult(value interface{}) (headers []string, rows [][]string, totalRows string, ok bool) {
+	m, isMap := value.(map[string]interface{})
+	if !isMap {
+		return nil, nil, "", false
+	}
+
+	// Must have schema.fields.
+	schemaRaw, hasSchema := m["schema"]
+	if !hasSchema {
+		return nil, nil, "", false
+	}
+	schema, isSchemaMap := schemaRaw.(map[string]interface{})
+	if !isSchemaMap {
+		return nil, nil, "", false
+	}
+	fieldsRaw, hasFields := schema["fields"]
+	if !hasFields {
+		return nil, nil, "", false
+	}
+	fields, isSlice := fieldsRaw.([]interface{})
+	if !isSlice || len(fields) == 0 {
+		return nil, nil, "", false
+	}
+
+	// Extract column names from schema.
+	for _, f := range fields {
+		fm, ok := f.(map[string]interface{})
+		if !ok {
+			return nil, nil, "", false
+		}
+		name, _ := fm["name"].(string)
+		if name == "" {
+			return nil, nil, "", false
+		}
+		headers = append(headers, Sanitize(name))
+	}
+
+	// Extract totalRows.
+	if tr, ok := m["totalRows"]; ok {
+		totalRows = fmt.Sprintf("%v", tr)
+	}
+
+	// Extract rows (may be absent for 0-row results).
+	rowsRaw, hasRows := m["rows"]
+	if !hasRows {
+		return headers, nil, totalRows, true
+	}
+	rowSlice, isRowSlice := rowsRaw.([]interface{})
+	if !isRowSlice {
+		return nil, nil, "", false
+	}
+
+	for _, row := range rowSlice {
+		rm, ok := row.(map[string]interface{})
+		if !ok {
+			return nil, nil, "", false
+		}
+		fArr, ok := rm["f"].([]interface{})
+		if !ok {
+			return nil, nil, "", false
+		}
+		cells := make([]string, len(headers))
+		for i, cell := range fArr {
+			if i >= len(headers) {
+				break
+			}
+			cm, ok := cell.(map[string]interface{})
+			if !ok {
+				cells[i] = ""
+				continue
+			}
+			v := cm["v"]
+			if v == nil {
+				cells[i] = "NULL"
+			} else {
+				cells[i] = Sanitize(fmt.Sprintf("%v", v))
+			}
+		}
+		rows = append(rows, cells)
+	}
+
+	return headers, rows, totalRows, true
+}
+
+// renderBQQueryTable renders a BQ query result as a formatted table.
+func renderBQQueryTable(value interface{}) bool {
+	headers, rows, totalRows, ok := isBQQueryResult(value)
+	if !ok {
+		return false
+	}
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader(headers)
+	table.SetAutoWrapText(false)
+	table.SetAutoFormatHeaders(false)
+	table.SetBorder(true)
+	table.SetRowLine(false)
+
+	for _, row := range rows {
+		table.Append(row)
+	}
+	table.Render()
+
+	if totalRows != "" {
+		fmt.Fprintf(os.Stdout, "(%s rows)\n", totalRows)
+	}
+	return true
+}
+
+// renderBQQueryText renders a BQ query result as aligned text columns.
+func renderBQQueryText(value interface{}) bool {
+	headers, rows, totalRows, ok := isBQQueryResult(value)
+	if !ok {
+		return false
+	}
+
+	if len(rows) == 0 {
+		fmt.Fprintln(os.Stdout, "(0 rows)")
+		return true
+	}
+
+	// Calculate column widths.
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			if len(cell) > widths[i] {
+				widths[i] = len(cell)
+			}
+		}
+	}
+
+	// Print header.
+	var line strings.Builder
+	for i, h := range headers {
+		if i > 0 {
+			line.WriteString(" | ")
+		}
+		line.WriteString(fmt.Sprintf("%-*s", widths[i], h))
+	}
+	fmt.Fprintln(os.Stdout, line.String())
+
+	// Print separator.
+	line.Reset()
+	for i, w := range widths {
+		if i > 0 {
+			line.WriteString("-+-")
+		}
+		line.WriteString(strings.Repeat("-", w))
+	}
+	fmt.Fprintln(os.Stdout, line.String())
+
+	// Print rows.
+	for _, row := range rows {
+		line.Reset()
+		for i, cell := range row {
+			if i > 0 {
+				line.WriteString(" | ")
+			}
+			line.WriteString(fmt.Sprintf("%-*s", widths[i], cell))
+		}
+		fmt.Fprintln(os.Stdout, line.String())
+	}
+
+	if totalRows != "" {
+		fmt.Fprintf(os.Stdout, "(%s rows)\n", totalRows)
+	}
+	return true
 }
