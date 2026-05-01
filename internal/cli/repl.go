@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
@@ -540,11 +541,14 @@ func executeAndCapture(binary string, args []string) commandResult {
 
 	stdout := stdoutBuf.String()
 
-	// Try to parse stdout as JSON for $last.
+	// Try to parse stdout as JSON for $last. Use json.Number to
+	// preserve large int64 values without float64 precision loss.
 	var parsed interface{}
 	trimmed := strings.TrimSpace(stdout)
 	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		if json.Unmarshal([]byte(trimmed), &parsed) != nil {
+		dec := json.NewDecoder(strings.NewReader(trimmed))
+		dec.UseNumber()
+		if dec.Decode(&parsed) != nil {
 			parsed = nil
 		}
 	}
@@ -622,8 +626,8 @@ func resolveLastRef(arg string, jsonData interface{}) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("$last: cannot index non-array")
 			}
-			var index int
-			if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
 				return "", fmt.Errorf("$last: invalid index [%s]", indexStr)
 			}
 			if index < 0 || index >= len(arr) {
@@ -640,6 +644,8 @@ func resolveLastRef(arg string, jsonData interface{}) (string, error) {
 	switch v := value.(type) {
 	case string:
 		valueStr = v
+	case json.Number:
+		valueStr = v.String()
 	case float64:
 		if v == float64(int64(v)) {
 			valueStr = fmt.Sprintf("%d", int64(v))
