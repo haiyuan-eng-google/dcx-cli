@@ -549,9 +549,9 @@ func executeAndCapture(binary string, args []string) commandResult {
 		dec := json.NewDecoder(strings.NewReader(trimmed))
 		dec.UseNumber()
 		if dec.Decode(&parsed) == nil {
-			// Verify no trailing non-whitespace after the JSON value.
+			// Any second-decode result other than io.EOF means trailing content.
 			var extra json.RawMessage
-			if dec.Decode(&extra) != io.EOF && extra != nil {
+			if dec.Decode(&extra) != io.EOF {
 				parsed = nil // trailing content — not clean JSON
 			}
 		} else {
