@@ -77,7 +77,11 @@ func Resolve(ctx context.Context, cfg Config) (*ResolvedAuth, error) {
 	}
 
 	// Tier 3: Stored OAuth credentials (dcx auth login).
-	// Not yet implemented — will use keyring in a future phase.
+	if stored, err := LoadStoredCredentials(ctx); err != nil {
+		return nil, fmt.Errorf("loading stored credentials: %w", err)
+	} else if stored != nil {
+		return stored, nil
+	}
 
 	// Tier 4: GOOGLE_APPLICATION_CREDENTIALS (standard ADC file).
 	if adcFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); adcFile != "" {
