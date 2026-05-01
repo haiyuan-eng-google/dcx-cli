@@ -364,7 +364,7 @@ func isBQQueryResult(value interface{}) (headers []string, rows [][]string, tota
 		if name == "" {
 			return nil, nil, "", false
 		}
-		headers = append(headers, name)
+		headers = append(headers, Sanitize(name))
 	}
 
 	// Extract totalRows.
@@ -405,7 +405,7 @@ func isBQQueryResult(value interface{}) (headers []string, rows [][]string, tota
 			if v == nil {
 				cells[i] = "NULL"
 			} else {
-				cells[i] = fmt.Sprintf("%v", v)
+				cells[i] = Sanitize(fmt.Sprintf("%v", v))
 			}
 		}
 		rows = append(rows, cells)
