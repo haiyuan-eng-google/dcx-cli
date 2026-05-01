@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,6 +15,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// commandResult captures the outcome of a subprocess command.
+type commandResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	JSON     interface{} // parsed JSON from stdout, nil if not valid JSON
+}
+
 // replContext holds session state across REPL commands.
 type replContext struct {
 	ProjectID       string
@@ -19,11 +30,12 @@ type replContext struct {
 	Location        string
 	Profile         string
 	Agent           string
-	Format          string // session output format (default: text)
-	Token           string // forwarded from parent --token
-	CredentialsFile string // forwarded from parent --credentials-file
-	Retry           int    // forwarded from parent --retry
-	OutputFields    string // forwarded from parent --output-fields
+	Format          string         // session output format (default: text)
+	LastResult      *commandResult // last successful command result ($last)
+	Token           string         // forwarded from parent --token
+	CredentialsFile string         // forwarded from parent --credentials-file
+	Retry           int            // forwarded from parent --retry
+	OutputFields    string         // forwarded from parent --output-fields
 }
 
 // blockedCommands are interactive/server commands that shouldn't run in the REPL.
@@ -143,6 +155,14 @@ func runREPL(app *App, formatExplicit bool) error {
 			continue
 		}
 
+		// Expand $last references in arguments.
+		var expandErr error
+		args, expandErr = expandLastRefs(args, ctx.LastResult)
+		if expandErr != nil {
+			fmt.Fprintf(os.Stderr, "  %s\n", expandErr)
+			continue
+		}
+
 		// Block interactive/server commands.
 		if isBlockedCommand(args) {
 			fmt.Fprintf(os.Stderr, "  command not available in REPL: %s\n", args[0])
@@ -155,13 +175,19 @@ func runREPL(app *App, formatExplicit bool) error {
 		// Append format if not already specified.
 		args = appendFormatIfMissing(args, ctx.Format)
 
-		// Execute as subprocess.
-		execCmd := exec.CommandContext(context.Background(), dcxBinary, args...)
-		execCmd.Stdout = os.Stdout
-		execCmd.Stderr = os.Stderr
-		execCmd.Stdin = os.Stdin
-		execCmd.Run() // ignore exit code — errors printed via stderr
+		// Execute as subprocess with capture.
+		result := executeAndCapture(dcxBinary, args)
 		fmt.Println() // blank line after output for readability
+
+		// Update $last: successful JSON → update; successful non-JSON → clear; error → keep.
+		if result.ExitCode == 0 {
+			if result.JSON != nil {
+				ctx.LastResult = &result
+			} else {
+				ctx.LastResult = nil // non-JSON clears $last
+			}
+		}
+		// On error, LastResult is unchanged (don't lose good state)
 	}
 }
 
@@ -489,4 +515,145 @@ func appendFormatIfMissing(args []string, format string) []string {
 		return args
 	}
 	return append(args, "--format", format)
+}
+
+// executeAndCapture runs a dcx subprocess, streaming stdout/stderr to the
+// terminal in real-time while also capturing them for $last and transcripts.
+func executeAndCapture(binary string, args []string) commandResult {
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	cmd := exec.CommandContext(context.Background(), binary, args...)
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+
+	err := cmd.Run()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+
+	// Try to parse stdout as JSON for $last.
+	var parsed interface{}
+	trimmed := strings.TrimSpace(stdout)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		if json.Unmarshal([]byte(trimmed), &parsed) != nil {
+			parsed = nil
+		}
+	}
+
+	return commandResult{
+		Stdout:   stdout,
+		Stderr:   stderrBuf.String(),
+		ExitCode: exitCode,
+		JSON:     parsed,
+	}
+}
+
+// expandLastRefs replaces $last and $last.path.to.field references in args.
+func expandLastRefs(args []string, last *commandResult) ([]string, error) {
+	result := make([]string, len(args))
+	for i, arg := range args {
+		if !strings.Contains(arg, "$last") {
+			result[i] = arg
+			continue
+		}
+		if last == nil {
+			return nil, fmt.Errorf("$last: no JSON result available; use /format json first")
+		}
+		expanded, err := resolveLastRef(arg, last.JSON)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = expanded
+	}
+	return result, nil
+}
+
+// resolveLastRef resolves a single $last reference within an argument string.
+// Supports: $last, $last.field, $last.field[0], $last.field[0].subfield
+func resolveLastRef(arg string, jsonData interface{}) (string, error) {
+	idx := strings.Index(arg, "$last")
+	if idx < 0 {
+		return arg, nil
+	}
+
+	prefix := arg[:idx]
+	path := arg[idx+5:] // after "$last"
+
+	value := jsonData
+
+	// Parse path segments: .field or [N]
+	for len(path) > 0 {
+		if path[0] == '.' {
+			path = path[1:]
+			// Extract field name (until next . or [ or end)
+			end := strings.IndexAny(path, ".[")
+			if end < 0 {
+				end = len(path)
+			}
+			fieldName := path[:end]
+			path = path[end:]
+
+			m, ok := value.(map[string]interface{})
+			if !ok {
+				return "", fmt.Errorf("$last: cannot access .%s on non-object", fieldName)
+			}
+			value, ok = m[fieldName]
+			if !ok {
+				return "", fmt.Errorf("$last: field %q not found", fieldName)
+			}
+		} else if path[0] == '[' {
+			end := strings.Index(path, "]")
+			if end < 0 {
+				return "", fmt.Errorf("$last: unclosed bracket in path")
+			}
+			indexStr := path[1:end]
+			path = path[end+1:]
+
+			arr, ok := value.([]interface{})
+			if !ok {
+				return "", fmt.Errorf("$last: cannot index non-array")
+			}
+			var index int
+			if _, err := fmt.Sscanf(indexStr, "%d", &index); err != nil {
+				return "", fmt.Errorf("$last: invalid index [%s]", indexStr)
+			}
+			if index < 0 || index >= len(arr) {
+				return "", fmt.Errorf("$last: index [%d] out of range (length %d)", index, len(arr))
+			}
+			value = arr[index]
+		} else {
+			break // remaining text is suffix
+		}
+	}
+
+	// Format the resolved value as a string.
+	var valueStr string
+	switch v := value.(type) {
+	case string:
+		valueStr = v
+	case float64:
+		if v == float64(int64(v)) {
+			valueStr = fmt.Sprintf("%d", int64(v))
+		} else {
+			valueStr = fmt.Sprintf("%g", v)
+		}
+	case bool:
+		valueStr = fmt.Sprintf("%t", v)
+	case nil:
+		valueStr = ""
+	default:
+		data, _ := json.Marshal(v)
+		valueStr = string(data)
+	}
+
+	return prefix + valueStr + path, nil
 }
