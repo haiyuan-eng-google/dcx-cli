@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -65,7 +67,13 @@ func Login(ctx context.Context) (*oauth2.Token, error) {
 	state := fmt.Sprintf("dcx-%d", time.Now().UnixNano())
 	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 
-	fmt.Fprintf(os.Stderr, "\nOpen this URL in your browser to log in:\n\n  %s\n\nWaiting for authorization...\n", authURL)
+	// Try to open the browser automatically; fall back to printing the URL.
+	if err := openBrowser(authURL); err != nil {
+		fmt.Fprintf(os.Stderr, "\nOpen this URL in your browser to log in:\n\n  %s\n\n", authURL)
+	} else {
+		fmt.Fprintf(os.Stderr, "\nOpening browser for authorization...\n(If it doesn't open, visit: %s)\n\n", authURL)
+	}
+	fmt.Fprintf(os.Stderr, "Waiting for authorization...\n")
 
 	// Wait for the redirect with the auth code.
 	codeCh := make(chan string, 1)
@@ -112,9 +120,11 @@ func Login(ctx context.Context) (*oauth2.Token, error) {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
 
-	// Save the refresh token.
+	// Save the refresh token — fail if we cannot persist, because the user
+	// would get a one-time access token but subsequent commands would still
+	// fall back to ADC.
 	if err := saveCredentials(config, token); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not save credentials: %v\n", err)
+		return nil, fmt.Errorf("saving credentials: %w", err)
 	}
 
 	return token, nil
@@ -147,7 +157,10 @@ func LoadStoredCredentials(ctx context.Context) (*ResolvedAuth, error) {
 	path := credentialsPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil // no stored credentials — not an error
+		if os.IsNotExist(err) {
+			return nil, nil // no stored credentials — not an error
+		}
+		return nil, fmt.Errorf("reading stored credentials: %w", err)
 	}
 
 	var creds storedCredentials
@@ -174,6 +187,20 @@ func LoadStoredCredentials(ctx context.Context) (*ResolvedAuth, error) {
 		Source:      path,
 		TokenSource: ts,
 	}, nil
+}
+
+// openBrowser opens the given URL in the user's default browser.
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform %s", runtime.GOOS)
+	}
 }
 
 // Logout removes stored credentials.
