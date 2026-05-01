@@ -108,6 +108,9 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	// Register shell completion command.
 	app.addCompletionCommand()
 
+	// Register interactive REPL (not in contract registry — human-only).
+	app.addREPLCommand()
+
 	return app
 }
 
