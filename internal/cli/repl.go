@@ -59,7 +59,9 @@ Examples:
   dcx> ca ask "top errors yesterday"
   dcx> exit`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runREPL(a)
+			formatExplicit := cmd.Flags().Changed("format") ||
+				cmd.InheritedFlags().Changed("format")
+			return runREPL(a, formatExplicit)
 		},
 	}
 
@@ -68,7 +70,7 @@ Examples:
 	// repl is interactive/human-only, not agent-discoverable.
 }
 
-func runREPL(app *App) error {
+func runREPL(app *App, formatExplicit bool) error {
 	dcxBinary, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolving executable path: %w", err)
@@ -82,7 +84,7 @@ func runREPL(app *App) error {
 		CredentialsFile: app.Opts.CredentialsFile,
 		Retry:           app.Opts.Retry,
 		OutputFields:    app.Opts.OutputFields,
-		Format:          "text", // human-readable default for REPL
+		Format:          replDefaultFormat(app.Opts.Format, formatExplicit),
 	}
 
 	line := liner.NewLiner()
@@ -464,6 +466,15 @@ func flagsPresent(args []string) map[string]bool {
 		}
 	}
 	return present
+}
+
+// replDefaultFormat returns the session format: use explicit --format if set,
+// otherwise default to "text" for human-readable REPL output.
+func replDefaultFormat(optsFormat string, explicit bool) string {
+	if explicit {
+		return optsFormat
+	}
+	return "text"
 }
 
 func appendFormatIfMissing(args []string, format string) []string {
