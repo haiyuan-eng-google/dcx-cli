@@ -179,7 +179,14 @@ func handleBuiltin(input string, ctx *replContext) bool {
 	}
 
 	if lower == "clear context" {
-		*ctx = replContext{Format: ctx.Format}
+		// Clear resource context only. Preserve auth/config forwarding
+		// and session settings so --token/--credentials-file sessions
+		// aren't broken by clearing context.
+		ctx.ProjectID = ""
+		ctx.DatasetID = ""
+		ctx.Location = ""
+		ctx.Profile = ""
+		ctx.Agent = ""
 		fmt.Fprintln(os.Stderr, "  context cleared")
 		return true
 	}
