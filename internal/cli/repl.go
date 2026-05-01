@@ -548,7 +548,13 @@ func executeAndCapture(binary string, args []string) commandResult {
 	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
 		dec := json.NewDecoder(strings.NewReader(trimmed))
 		dec.UseNumber()
-		if dec.Decode(&parsed) != nil {
+		if dec.Decode(&parsed) == nil {
+			// Verify no trailing non-whitespace after the JSON value.
+			var extra json.RawMessage
+			if dec.Decode(&extra) != io.EOF && extra != nil {
+				parsed = nil // trailing content — not clean JSON
+			}
+		} else {
 			parsed = nil
 		}
 	}
@@ -626,11 +632,14 @@ func resolveLastRef(arg string, jsonData interface{}) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("$last: cannot index non-array")
 			}
+			if !isDigitsOnly(indexStr) {
+				return "", fmt.Errorf("$last: invalid index [%s]", indexStr)
+			}
 			index, err := strconv.Atoi(indexStr)
 			if err != nil {
 				return "", fmt.Errorf("$last: invalid index [%s]", indexStr)
 			}
-			if index < 0 || index >= len(arr) {
+			if index >= len(arr) {
 				return "", fmt.Errorf("$last: index [%d] out of range (length %d)", index, len(arr))
 			}
 			value = arr[index]
@@ -662,4 +671,17 @@ func resolveLastRef(arg string, jsonData interface{}) (string, error) {
 	}
 
 	return prefix + valueStr + path, nil
+}
+
+// isDigitsOnly returns true if s is non-empty and contains only 0-9.
+func isDigitsOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
