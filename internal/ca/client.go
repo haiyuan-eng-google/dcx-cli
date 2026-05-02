@@ -483,14 +483,75 @@ func (c *Client) ListAgents(ctx context.Context, token, projectID, _ string) (*A
 	}, nil
 }
 
+// extractErrorMessage tries multiple JSON error shapes to find a useful message.
 func extractErrorMessage(body []byte, statusCode int) string {
+	// Shape 1: Standard Google API error {"error": {"message": "...", "status": "..."}}
 	var apiErr struct {
 		Error struct {
 			Message string `json:"message"`
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Details []struct {
+				Detail string `json:"detail"`
+				Reason string `json:"reason"`
+			} `json:"details"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
-		return apiErr.Error.Message
+		msg := apiErr.Error.Message
+		for _, d := range apiErr.Error.Details {
+			if d.Reason != "" {
+				msg += " (" + d.Reason + ")"
+				break
+			}
+		}
+		return msg
+	}
+
+	// Shape 2: Array-wrapped error [{"error": {"message": "..."}}]
+	var arrErr []struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Details []struct {
+				Detail string `json:"detail"`
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &arrErr) == nil && len(arrErr) > 0 && arrErr[0].Error.Message != "" {
+		msg := arrErr[0].Error.Message
+		for _, d := range arrErr[0].Error.Details {
+			if d.Reason != "" {
+				msg += " (" + d.Reason + ")"
+				break
+			}
+		}
+		return msg
+	}
+
+	// Shape 3: Flat message {"message": "...", "error": "..."}
+	var flatErr struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if json.Unmarshal(body, &flatErr) == nil {
+		if flatErr.Message != "" {
+			return flatErr.Message
+		}
+		if flatErr.Error != "" {
+			return flatErr.Error
+		}
+	}
+
+	// Fallback: include raw body (truncated) so users can debug.
+	raw := string(body)
+	if len(raw) > 200 {
+		raw = raw[:200] + "..."
+	}
+	if raw != "" {
+		return fmt.Sprintf("API returned HTTP %d: %s", statusCode, raw)
 	}
 	return fmt.Sprintf("API returned HTTP %d", statusCode)
 }
@@ -1017,16 +1078,7 @@ func parseBQTableRefMap(ref string) map[string]string {
 
 func readAPIError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
-	var apiErr struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
-	}
-	message := fmt.Sprintf("API returned HTTP %d", resp.StatusCode)
-	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
-		message = apiErr.Error.Message
-	}
+	message := extractErrorMessage(body, resp.StatusCode)
 	return &dcxerrors.APIHTTPError{StatusCode: resp.StatusCode, Message: message, RetryAfter: resp.Header.Get("Retry-After")}
 }
 
