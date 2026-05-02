@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -104,6 +105,10 @@ func runREPL(app *App, formatExplicit bool) error {
 	defer line.Close()
 	line.SetCtrlCAborts(true)
 
+	// Wire tab completion from the contract registry.
+	completer := buildCompleter(app.Registry)
+	line.SetWordCompleter(completer)
+
 	fmt.Fprintf(os.Stderr, "dcx interactive session. Type 'help' for commands, 'exit' to quit.\n")
 	if ctx.ProjectID != "" {
 		fmt.Fprintf(os.Stderr, "  project: %s\n", ctx.ProjectID)
@@ -143,6 +148,16 @@ func runREPL(app *App, formatExplicit bool) error {
 		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isBareReadOnlySQL(input[8:]) {
 			sql := collectMultilineSQL(input[8:], line)
 			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
+		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isWriteSQL(input[8:]) {
+			sql := collectMultilineSQL(input[8:], line)
+			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
+		} else if strings.HasPrefix(strings.ToLower(input), "run ") && isWriteSQL(input[4:]) {
+			sql := collectMultilineSQL(input[4:], line)
+			args = []string{"jobs", "query", "--query", sql}
+		} else if isWriteSQL(input) {
+			fmt.Fprintf(os.Stderr, "  DML/DDL requires explicit prefix: run %s\n", strings.Fields(input)[0])
+			fmt.Fprintln(os.Stderr, "  Use 'dry-run ...' to validate without executing.")
+			continue
 		} else {
 			args = parseLineToArgv(input)
 		}
@@ -226,6 +241,18 @@ func handleBuiltin(input string, ctx *replContext) bool {
 	if strings.HasPrefix(lower, "/format ") {
 		ctx.Format = strings.TrimSpace(input[8:])
 		fmt.Fprintf(os.Stderr, "  format: %s\n", ctx.Format)
+		return true
+	}
+
+	if strings.HasPrefix(lower, "/output-fields") {
+		rest := strings.TrimSpace(input[len("/output-fields"):])
+		if rest == "" || rest == "clear" {
+			ctx.OutputFields = ""
+			fmt.Fprintln(os.Stderr, "  output-fields: (all)")
+		} else {
+			ctx.OutputFields = rest
+			fmt.Fprintf(os.Stderr, "  output-fields: %s\n", ctx.OutputFields)
+		}
 		return true
 	}
 
@@ -316,6 +343,21 @@ func isBareReadOnlySQL(input string) bool {
 		strings.HasPrefix(upper, "WITH\n") ||
 		upper == "SELECT" ||
 		upper == "WITH"
+}
+
+// isWriteSQL detects DML/DDL statements that modify data or schema.
+func isWriteSQL(input string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(input))
+	prefixes := []string{
+		"INSERT ", "UPDATE ", "DELETE ", "MERGE ",
+		"CREATE ", "DROP ", "ALTER ", "TRUNCATE ",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(upper, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectMultilineSQL continues reading if the SQL doesn't end with ;
@@ -685,3 +727,136 @@ func isDigitsOnly(s string) bool {
 	}
 	return true
 }
+
+// buildCompleter creates a tab completion function from the contract registry.
+func buildCompleter(registry *contracts.Registry) func(line string, pos int) (string, []string, string) {
+	// Build command index: strip "dcx " prefix from all registered commands.
+	type cmdEntry struct {
+		segments []string // e.g. ["ca", "ask"]
+		flags    []string // e.g. ["--agent", "--tables"]
+	}
+	var commands []cmdEntry
+	for _, c := range registry.All() {
+		path := strings.TrimPrefix(c.Command, "dcx ")
+		segs := strings.Fields(path)
+		if len(segs) == 0 {
+			continue
+		}
+		// Skip blocked commands.
+		if blockedCommands[segs[0]] {
+			continue
+		}
+		var flags []string
+		for _, f := range c.Flags {
+			if !f.Positional {
+				flags = append(flags, "--"+f.Name)
+			}
+		}
+		// Add global flags.
+		for _, gf := range contracts.GlobalFlags() {
+			flags = append(flags, "--"+gf.Name)
+		}
+		commands = append(commands, cmdEntry{segments: segs, flags: flags})
+	}
+
+	// Builtins for completion.
+	builtins := []string{
+		"set project", "set dataset", "set location", "set profile", "set agent",
+		"show context", "clear context",
+		"/format json", "/format text", "/format table",
+		"/output-fields", "/output-fields clear",
+		"help", "exit", "quit",
+	}
+
+	return func(line string, pos int) (string, []string, string) {
+		// Only complete at end of line.
+		head := line[:pos]
+		tail := line[pos:]
+
+		// Check if we're completing a flag (after "--").
+		fields := strings.Fields(head)
+		lastWord := ""
+		if len(head) > 0 && head[len(head)-1] != ' ' && len(fields) > 0 {
+			lastWord = fields[len(fields)-1]
+			fields = fields[:len(fields)-1]
+		}
+
+		// Flag completion: if lastWord starts with "--", suggest flags for the matched command.
+		if strings.HasPrefix(lastWord, "--") {
+			// Find the command that matches the fields typed so far.
+			prefix := lastWord
+			var suggestions []string
+			for _, cmd := range commands {
+				if matchesPrefix(fields, cmd.segments) {
+					for _, f := range cmd.flags {
+						if strings.HasPrefix(f, prefix) {
+							suggestions = append(suggestions, f)
+						}
+					}
+					break
+				}
+			}
+			dedupSort(&suggestions)
+			headPrefix := head[:len(head)-len(lastWord)]
+			return headPrefix, suggestions, tail
+		}
+
+		// Command/builtin completion.
+		typed := strings.ToLower(strings.TrimSpace(head))
+		var suggestions []string
+
+		// Match builtins.
+		for _, b := range builtins {
+			if strings.HasPrefix(b, typed) {
+				suggestions = append(suggestions, b)
+			}
+		}
+
+		// Match commands — suggest the next segment.
+		for _, cmd := range commands {
+			full := strings.Join(cmd.segments, " ")
+			if strings.HasPrefix(full, typed) {
+				// Suggest only the next segment beyond what's typed.
+				typedParts := strings.Fields(typed)
+				if len(typedParts) <= len(cmd.segments) {
+					suggestion := strings.Join(cmd.segments[:len(typedParts)], " ")
+					if len(typedParts) < len(cmd.segments) {
+						suggestion = strings.Join(cmd.segments[:len(typedParts)+1], " ")
+					}
+					suggestions = append(suggestions, suggestion)
+				}
+			}
+		}
+
+		dedupSort(&suggestions)
+		return "", suggestions, tail
+	}
+}
+
+// matchesPrefix checks if typed fields match the command segments as a prefix.
+func matchesPrefix(typed []string, segments []string) bool {
+	if len(typed) > len(segments) {
+		return false
+	}
+	for i, t := range typed {
+		if !strings.EqualFold(t, segments[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// dedupSort removes duplicates and sorts a string slice in place.
+func dedupSort(s *[]string) {
+	seen := make(map[string]bool)
+	result := (*s)[:0]
+	for _, v := range *s {
+		if !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+	sort.Strings(result)
+	*s = result
+}
+
