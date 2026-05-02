@@ -783,17 +783,26 @@ func buildCompleter(registry *contracts.Registry) func(line string, pos int) (st
 
 		// Flag completion: if lastWord starts with "--", suggest flags for the matched command.
 		if strings.HasPrefix(lastWord, "--") {
-			// Find the command that matches the fields typed so far.
+			// Find the command by longest registered prefix match,
+			// ignoring positional args beyond the command path.
 			prefix := lastWord
 			var suggestions []string
-			for _, cmd := range commands {
-				if matchesPrefix(fields, cmd.segments) {
-					for _, f := range cmd.flags {
-						if strings.HasPrefix(f, prefix) {
-							suggestions = append(suggestions, f)
-						}
+			var bestMatch *cmdEntry
+			bestLen := 0
+			for i := range commands {
+				cmd := &commands[i]
+				if len(cmd.segments) <= len(fields) && matchesPrefix(fields[:len(cmd.segments)], cmd.segments) {
+					if len(cmd.segments) > bestLen {
+						bestLen = len(cmd.segments)
+						bestMatch = cmd
 					}
-					break
+				}
+			}
+			if bestMatch != nil {
+				for _, f := range bestMatch.flags {
+					if strings.HasPrefix(f, prefix) {
+						suggestions = append(suggestions, f)
+					}
 				}
 			}
 			dedupSort(&suggestions)
@@ -859,4 +868,3 @@ func dedupSort(s *[]string) {
 	sort.Strings(result)
 	*s = result
 }
-
