@@ -330,9 +330,22 @@ func formatScalar(v interface{}) string {
 
 // isBQQueryResult checks if value has the BigQuery query response shape:
 // {"rows": [...], "schema": {"fields": [...]}, "totalRows": "N"}
+// Requires at least one query-response discriminator beyond just schema.fields
+// to avoid false-triggering on schema-only objects.
 func isBQQueryResult(value interface{}) (headers []string, rows [][]string, totalRows string, ok bool) {
 	m, isMap := value.(map[string]interface{})
 	if !isMap {
+		return nil, nil, "", false
+	}
+
+	// Require at least one query-response discriminator to avoid matching
+	// arbitrary objects that happen to have schema.fields (e.g., --output-fields=schema).
+	_, hasRows := m["rows"]
+	_, hasTotalRows := m["totalRows"]
+	_, hasJobComplete := m["jobComplete"]
+	_, hasJobRef := m["jobReference"]
+	_, hasCacheHit := m["cacheHit"]
+	if !hasRows && !hasTotalRows && !hasJobComplete && !hasJobRef && !hasCacheHit {
 		return nil, nil, "", false
 	}
 
@@ -405,13 +418,22 @@ func isBQQueryResult(value interface{}) (headers []string, rows [][]string, tota
 			if v == nil {
 				cells[i] = "NULL"
 			} else {
-				cells[i] = Sanitize(fmt.Sprintf("%v", v))
+				cells[i] = escapeCellValue(Sanitize(fmt.Sprintf("%v", v)))
 			}
 		}
 		rows = append(rows, cells)
 	}
 
 	return headers, rows, totalRows, true
+}
+
+// escapeCellValue replaces newlines and tabs with visible escape sequences
+// for tabular display. Keeps raw values unchanged for JSON formats.
+func escapeCellValue(s string) string {
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
 }
 
 // renderBQQueryTable renders a BQ query result as a formatted table.

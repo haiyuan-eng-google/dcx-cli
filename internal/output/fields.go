@@ -45,6 +45,19 @@ func parseFieldSet(fields string) map[string]bool {
 }
 
 func filterValue(raw interface{}, fields map[string]bool) interface{} {
+	// Bare array: filter each element.
+	if arr, ok := raw.([]interface{}); ok {
+		filtered := make([]interface{}, 0, len(arr))
+		for _, item := range arr {
+			if m, ok := item.(map[string]interface{}); ok {
+				filtered = append(filtered, filterMap(m, fields))
+			} else {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered
+	}
+
 	m, ok := raw.(map[string]interface{})
 	if !ok {
 		return raw
