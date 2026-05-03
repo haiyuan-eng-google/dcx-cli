@@ -458,19 +458,10 @@ func isBlockedCommand(args []string) bool {
 	if blockedCommands[args[0]] {
 		return true
 	}
-	// Block "spanner operations wait" and similar wait commands.
-	if len(args) >= 2 && args[len(args)-1] == "wait" {
+	// Block specific long-running wait commands by path.
+	// "spanner operations wait", "spanner databaseOperations wait", etc.
+	if len(args) >= 3 && args[0] == "spanner" && args[2] == "wait" {
 		return true
-	}
-	// More precise: check last subcommand segment.
-	for i := len(args) - 1; i >= 0; i-- {
-		if args[i] == "wait" && !strings.HasPrefix(args[i], "--") {
-			return true
-		}
-		if strings.HasPrefix(args[i], "--") {
-			continue
-		}
-		break
 	}
 	return false
 }
