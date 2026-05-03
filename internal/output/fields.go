@@ -99,9 +99,15 @@ func filterListEnvelope(envelope map[string]interface{}, items []interface{}, fi
 
 	// Filter each item.
 	filtered := make([]interface{}, 0, len(items))
+	warned := false
 	for _, item := range items {
 		if m, ok := item.(map[string]interface{}); ok {
-			filtered = append(filtered, filterMap(m, fields))
+			fm := filterMap(m, fields)
+			if !warned && len(fm) == 0 && len(m) > 0 {
+				warnNoFieldMatch(m, fields)
+				warned = true
+			}
+			filtered = append(filtered, fm)
 		} else {
 			filtered = append(filtered, item)
 		}

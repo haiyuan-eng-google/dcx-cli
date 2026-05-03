@@ -12,8 +12,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -176,13 +178,16 @@ var HTTPClient = http.DefaultClient
 
 // verifyToken makes a lightweight tokeninfo call to verify the token is valid.
 func verifyToken(ctx context.Context, token string) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://oauth2.googleapis.com/tokeninfo?access_token="+token, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://oauth2.googleapis.com/tokeninfo", nil)
 	if err != nil {
-		return fmt.Errorf("token verification failed: %w", err)
+		return fmt.Errorf("token verification request failed")
 	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Body = io.NopCloser(strings.NewReader("access_token=" + token))
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("token verification failed: %w", err)
+		// Don't wrap the error — it may contain the URL or request details.
+		return fmt.Errorf("token verification failed (network error)")
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {

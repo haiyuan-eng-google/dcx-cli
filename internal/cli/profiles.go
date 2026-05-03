@@ -103,21 +103,14 @@ func (a *App) profilesValidateCmd() *cobra.Command {
 				return nil
 			}
 
-			// Filter to specific profile if name given.
+			// Filter to specific profile if name given (supports filename, YAML name, or path).
 			if len(args) == 1 {
-				name := args[0]
-				var found bool
-				for _, p := range all {
-					if p.Name == name {
-						all = []profiles.Profile{p}
-						found = true
-						break
-					}
-				}
-				if !found {
-					dcxerrors.Emit(dcxerrors.NotFound, "profile not found: "+name, "Run 'dcx profiles list' to see available profiles")
+				p, err := profiles.LoadByName(args[0])
+				if err != nil {
+					dcxerrors.Emit(dcxerrors.NotFound, err.Error(), "Run 'dcx profiles list' to see available profiles")
 					return nil
 				}
+				all = []profiles.Profile{*p}
 			}
 
 			var results []profiles.ValidationResult
