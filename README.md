@@ -4,7 +4,7 @@ An agent-native CLI for Google Cloud's Data Cloud, built in Go.
 One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker —
 with structured output, typed errors, and an MCP bridge for AI agents.
 
-> **Status:** Go MVP functional — 86 commands across 11 domains.
+> **Status:** Go MVP functional — 88 commands across 11 domains.
 > Benchmarked at **5x faster** than `bq` with token cost within 6%.
 > See [docs/benchmark_results.md](docs/benchmark_results.md)
 > for measured results.
@@ -47,6 +47,17 @@ dcx ca ask "top errors yesterday" --profile my-spanner-profile
 dcx ca create-agent --name=sales-agent --tables=myproject.sales.orders --project-id=myproject
 dcx ca ask "revenue by region this quarter" --agent=sales-agent --project-id=myproject
 
+# SQL queries render as tables in text/table format
+dcx jobs query --query="SELECT event_type, COUNT(*) as cnt FROM events GROUP BY 1 LIMIT 5" --format=text
+# → event_type   | cnt
+#   -------------+----
+#   LLM_RESPONSE | 54
+#   LLM_REQUEST  | 52
+#   (5 rows)
+
+# Interactive REPL for iterative exploration
+dcx repl --project-id=myproject --location=us
+
 # Enable shell completions (bash/zsh/fish/powershell)
 source <(dcx completion bash)
 
@@ -54,7 +65,34 @@ source <(dcx completion bash)
 dcx mcp serve
 ```
 
-## Commands (86 total)
+## Interactive REPL
+
+`dcx repl` provides an interactive session with context persistence,
+tab completion, bare SQL routing, and result chaining:
+
+```
+dcx> set dataset analytics
+dcx> tables list
+dcx> SELECT event_type, COUNT(*) as cnt FROM `proj.analytics.events` GROUP BY 1 LIMIT 5;
+
+event_type   | cnt
+-------------+----
+LLM_RESPONSE | 54
+LLM_REQUEST  | 52
+(5 rows)
+
+dcx> /format json
+dcx> datasets list
+dcx> tables list --dataset-id=$last.items[0]._resource_id
+dcx> ca create-agent --name=my-agent --tables=proj.analytics.events
+dcx> set agent my-agent
+dcx> ca ask "top errors yesterday"
+```
+
+Features: tab completion, `$last` result references, `/output-fields` toggle,
+`/transcript start/stop`, DML/DDL safety (`run`/`dry-run`), Ctrl-C signal handling.
+
+## Commands (88 total)
 
 | Surface | Commands |
 |---|---|
@@ -64,7 +102,7 @@ dcx mcp serve
 | **Cloud SQL** | `instances list/get`, `databases list/get/insert/delete`, `backupRuns list/get`, `users list/get/insert/delete`, `operations list/get`, `flags list`, `tiers list`, `schema describe` |
 | **Looker** | `instances list/get`, `backups list/get`, `explores list`, `dashboards get` |
 | **CA** | `ca ask`, `ca create-agent`, `ca list-agents`, `ca add-verified-query`, `ca delete-agent` |
-| **Auth** | `auth status`, `auth check` |
+| **Auth** | `auth status`, `auth check`, `auth login`, `auth logout` |
 | **Profiles** | `profiles list`, `profiles validate`, `profiles test` |
 | **Introspection** | `meta commands`, `meta describe`, `meta generate-skills`, `meta schema` |
 | **MCP** | `mcp serve` (JSON-RPC 2.0 / stdio, read-only, default `json-minified`) |
@@ -111,9 +149,20 @@ Five methods in priority order:
 |----------|--------|----------|
 | 1 | `DCX_TOKEN` env var / `--token` | Pre-obtained access token |
 | 2 | `DCX_CREDENTIALS_FILE` / `--credentials-file` | Service account JSON |
-| 3 | `dcx auth login` | Interactive OAuth (P1) |
+| 3 | `dcx auth login` | Interactive OAuth2 browser flow |
 | 4 | `GOOGLE_APPLICATION_CREDENTIALS` | Standard ADC |
 | 5 | `gcloud auth application-default` | Implicit gcloud credentials |
+
+```bash
+# Log in via browser (stores refresh token to ~/.config/dcx/credentials.json)
+dcx auth login
+
+# Verify
+dcx auth check
+
+# Log out (removes stored credentials)
+dcx auth logout
+```
 
 ## Benchmarks
 
