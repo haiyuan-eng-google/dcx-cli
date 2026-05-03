@@ -130,7 +130,11 @@ func runREPL(app *App, formatExplicit bool) error {
 		prompt := "dcx> "
 		input, err := line.Prompt(prompt)
 		if err != nil {
-			// Ctrl-D or error
+			if err == liner.ErrPromptAborted {
+				// Ctrl-C at prompt — clear line and continue.
+				continue
+			}
+			// Ctrl-D or other error — exit.
 			fmt.Fprintln(os.Stderr)
 			return nil
 		}
@@ -204,11 +208,13 @@ func runREPL(app *App, formatExplicit bool) error {
 		args = appendFormatIfMissing(args, ctx.Format)
 
 		// Execute as subprocess with capture and signal handling.
+		cmdStart := time.Now()
 		result := executeWithSignal(dcxBinary, args)
+		cmdDuration := time.Since(cmdStart)
 		fmt.Println() // blank line after output for readability
 
 		// Log to transcript if active.
-		transcriptLog(&ctx, input, &result)
+		transcriptLog(&ctx, input, &result, cmdDuration)
 
 		// Update $last: successful JSON → update; successful non-JSON → clear; error → keep.
 		if result.ExitCode == 0 {
@@ -821,40 +827,70 @@ func handleTranscript(rest string, ctx *replContext) {
 }
 
 // transcriptLog writes a command and its result to the transcript file.
-func transcriptLog(ctx *replContext, input string, result *commandResult) {
+func transcriptLog(ctx *replContext, input string, result *commandResult, duration time.Duration) {
 	if ctx.Transcript == nil {
 		return
 	}
 	f := ctx.Transcript
 
-	// Redact --token values from the logged input.
-	redacted := redactTokens(input)
-	fmt.Fprintf(f, "dcx> %s\n", redacted)
+	// Per-command timestamp and duration.
+	fmt.Fprintf(f, "# %s (%s)\n", time.Now().Format(time.RFC3339), duration.Round(time.Millisecond))
 
+	// Redact secrets from input.
+	fmt.Fprintf(f, "dcx> %s\n", redactSecrets(input))
+
+	// Redact secrets from stdout/stderr before logging.
 	if result.Stdout != "" {
-		fmt.Fprintf(f, "%s\n", result.Stdout)
+		fmt.Fprintf(f, "%s\n", redactSecrets(result.Stdout))
 	}
 	if result.Stderr != "" {
-		fmt.Fprintf(f, "[stderr] %s\n", result.Stderr)
+		fmt.Fprintf(f, "[stderr] %s\n", redactSecrets(result.Stderr))
 	}
-	if result.ExitCode != 0 {
-		fmt.Fprintf(f, "[exit %d]\n", result.ExitCode)
-	}
-	fmt.Fprintln(f)
+	fmt.Fprintf(f, "[exit %d]\n\n", result.ExitCode)
 }
 
-// redactTokens replaces --token values and known secret patterns.
-func redactTokens(input string) string {
-	// Redact --token=VALUE and --token VALUE patterns.
-	fields := strings.Fields(input)
+// redactSecrets replaces token values, credential file paths, and
+// bearer tokens in text to prevent leaking secrets to transcript files.
+func redactSecrets(input string) string {
+	lines := strings.Split(input, "\n")
+	for i, line := range lines {
+		lines[i] = redactLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func redactLine(line string) string {
+	fields := strings.Fields(line)
 	for i, f := range fields {
+		// --token=VALUE
 		if strings.HasPrefix(f, "--token=") {
 			fields[i] = "--token=***"
-		} else if f == "--token" && i+1 < len(fields) {
+		}
+		// --token VALUE (next field is the value)
+		if f == "--token" && i+1 < len(fields) {
 			fields[i+1] = "***"
+		}
+		// --credentials-file=PATH → basename only
+		if strings.HasPrefix(f, "--credentials-file=") {
+			path := strings.TrimPrefix(f, "--credentials-file=")
+			fields[i] = "--credentials-file=***/" + basename(path)
+		}
+		// Credential file paths (e.g., /home/user/.config/dcx/credentials.json)
+		if strings.Contains(f, "credentials.json") && strings.Contains(f, "/") {
+			fields[i] = "***/" + basename(f)
+		}
+		// Bearer tokens (ya29.*, access tokens)
+		if strings.HasPrefix(f, "ya29.") || (len(f) > 50 && !strings.Contains(f, "/") && !strings.Contains(f, " ")) {
+			fields[i] = "***"
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+// basename returns the last path segment.
+func basename(path string) string {
+	parts := strings.Split(path, "/")
+	return parts[len(parts)-1]
 }
 
 // buildCompleter creates a tab completion function from the contract registry.
