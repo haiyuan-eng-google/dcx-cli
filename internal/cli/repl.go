@@ -836,61 +836,43 @@ func transcriptLog(ctx *replContext, input string, result *commandResult, durati
 	// Per-command timestamp and duration.
 	fmt.Fprintf(f, "# %s (%s)\n", time.Now().Format(time.RFC3339), duration.Round(time.Millisecond))
 
-	// Redact secrets from input.
-	fmt.Fprintf(f, "dcx> %s\n", redactSecrets(input))
+	// Redact secrets from the input command line only.
+	fmt.Fprintf(f, "dcx> %s\n", redactInputLine(input))
 
-	// Redact secrets from stdout/stderr before logging.
+	// Stdout/stderr are logged verbatim — they don't contain user-supplied
+	// secrets (tokens come from flags/env, not API responses).
 	if result.Stdout != "" {
-		fmt.Fprintf(f, "%s\n", redactSecrets(result.Stdout))
+		fmt.Fprintf(f, "%s\n", result.Stdout)
 	}
 	if result.Stderr != "" {
-		fmt.Fprintf(f, "[stderr] %s\n", redactSecrets(result.Stderr))
+		fmt.Fprintf(f, "[stderr] %s\n", result.Stderr)
 	}
 	fmt.Fprintf(f, "[exit %d]\n\n", result.ExitCode)
 }
 
-// redactSecrets replaces token values, credential file paths, and
-// bearer tokens in text to prevent leaking secrets to transcript files.
-func redactSecrets(input string) string {
-	lines := strings.Split(input, "\n")
-	for i, line := range lines {
-		lines[i] = redactLine(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func redactLine(line string) string {
-	fields := strings.Fields(line)
+// redactInputLine redacts secret flag values from a REPL input command line.
+// Only operates on the user-typed command, not on stdout/stderr output.
+func redactInputLine(input string) string {
+	fields := strings.Fields(input)
 	for i, f := range fields {
 		// --token=VALUE
 		if strings.HasPrefix(f, "--token=") {
 			fields[i] = "--token=***"
 		}
-		// --token VALUE (next field is the value)
+		// --token VALUE
 		if f == "--token" && i+1 < len(fields) {
 			fields[i+1] = "***"
 		}
-		// --credentials-file=PATH → basename only
+		// --credentials-file=PATH
 		if strings.HasPrefix(f, "--credentials-file=") {
-			path := strings.TrimPrefix(f, "--credentials-file=")
-			fields[i] = "--credentials-file=***/" + basename(path)
+			fields[i] = "--credentials-file=***"
 		}
-		// Credential file paths (e.g., /home/user/.config/dcx/credentials.json)
-		if strings.Contains(f, "credentials.json") && strings.Contains(f, "/") {
-			fields[i] = "***/" + basename(f)
-		}
-		// Bearer tokens (ya29.*, access tokens)
-		if strings.HasPrefix(f, "ya29.") || (len(f) > 50 && !strings.Contains(f, "/") && !strings.Contains(f, " ")) {
-			fields[i] = "***"
+		// --credentials-file PATH
+		if f == "--credentials-file" && i+1 < len(fields) {
+			fields[i+1] = "***"
 		}
 	}
 	return strings.Join(fields, " ")
-}
-
-// basename returns the last path segment.
-func basename(path string) string {
-	parts := strings.Split(path, "/")
-	return parts[len(parts)-1]
 }
 
 // buildCompleter creates a tab completion function from the contract registry.
