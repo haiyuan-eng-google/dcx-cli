@@ -48,7 +48,7 @@ dcx ca create-agent --name=sales-agent --tables=myproject.sales.orders --project
 dcx ca ask "revenue by region this quarter" --agent=sales-agent --project-id=myproject
 
 # SQL queries render as tables in text/table format
-dcx jobs query --query="SELECT event_type, COUNT(*) as cnt FROM events GROUP BY 1 LIMIT 5" --format=text
+dcx jobs query --project-id=myproject --query="SELECT event_type, COUNT(*) as cnt FROM \`myproject.mydataset.events\` GROUP BY 1 LIMIT 5" --format=text
 # → event_type   | cnt
 #   -------------+----
 #   LLM_RESPONSE | 54
@@ -71,9 +71,11 @@ dcx mcp serve
 tab completion, bare SQL routing, and result chaining:
 
 ```
+dcx> set project myproject
 dcx> set dataset analytics
+dcx> set location us
 dcx> tables list
-dcx> SELECT event_type, COUNT(*) as cnt FROM `proj.analytics.events` GROUP BY 1 LIMIT 5;
+dcx> SELECT event_type, COUNT(*) as cnt FROM `myproject.analytics.events` GROUP BY 1 LIMIT 5;
 
 event_type   | cnt
 -------------+----
@@ -84,7 +86,7 @@ LLM_REQUEST  | 52
 dcx> /format json
 dcx> datasets list
 dcx> tables list --dataset-id=$last.items[0]._resource_id
-dcx> ca create-agent --name=my-agent --tables=proj.analytics.events
+dcx> ca create-agent --name=my-agent --tables=myproject.analytics.events
 dcx> set agent my-agent
 dcx> ca ask "top errors yesterday"
 ```
