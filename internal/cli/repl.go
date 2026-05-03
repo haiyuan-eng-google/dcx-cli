@@ -168,8 +168,11 @@ func runREPL(app *App, formatExplicit bool) error {
 		} else if strings.HasPrefix(lower, "run ") && isAnySQL(input[4:]) {
 			sql := collectMultilineSQL(input[4:], line)
 			args = []string{"jobs", "query", "--query", sql}
-		} else if lower == "run" || lower == "dry-run" {
+		} else if lower == "run" {
 			fmt.Fprintln(os.Stderr, "  usage: run <SQL statement>")
+			continue
+		} else if lower == "dry-run" {
+			fmt.Fprintln(os.Stderr, "  usage: dry-run <SQL statement>")
 			continue
 		} else if isWriteSQL(input) {
 			fmt.Fprintf(os.Stderr, "  DML/DDL requires explicit prefix: run %s\n", strings.Fields(input)[0])
@@ -790,7 +793,7 @@ func executeWithSignal(binary string, args []string) commandResult {
 
 // handleTranscript processes /transcript start|stop commands.
 func handleTranscript(rest string, ctx *replContext) {
-	parts := strings.Fields(rest)
+	parts := parseLineToArgv(rest)
 	if len(parts) == 0 {
 		if ctx.Transcript != nil {
 			fmt.Fprintf(os.Stderr, "  transcript: recording to %s\n", ctx.Transcript.Name())
@@ -861,28 +864,28 @@ func transcriptLog(ctx *replContext, input string, result *commandResult, durati
 }
 
 // redactInputLine redacts secret flag values from a REPL input command line.
-// Only operates on the user-typed command, not on stdout/stderr output.
+// Uses the same quote-aware parser as command execution to handle quoted values.
 func redactInputLine(input string) string {
-	fields := strings.Fields(input)
-	for i, f := range fields {
+	args := parseLineToArgv(input)
+	for i, f := range args {
 		// --token=VALUE
 		if strings.HasPrefix(f, "--token=") {
-			fields[i] = "--token=***"
+			args[i] = "--token=***"
 		}
-		// --token VALUE
-		if f == "--token" && i+1 < len(fields) {
-			fields[i+1] = "***"
+		// --token VALUE (next arg is the value, even if it was quoted)
+		if f == "--token" && i+1 < len(args) {
+			args[i+1] = "***"
 		}
 		// --credentials-file=PATH
 		if strings.HasPrefix(f, "--credentials-file=") {
-			fields[i] = "--credentials-file=***"
+			args[i] = "--credentials-file=***"
 		}
 		// --credentials-file PATH
-		if f == "--credentials-file" && i+1 < len(fields) {
-			fields[i+1] = "***"
+		if f == "--credentials-file" && i+1 < len(args) {
+			args[i+1] = "***"
 		}
 	}
-	return strings.Join(fields, " ")
+	return strings.Join(args, " ")
 }
 
 // buildCompleter creates a tab completion function from the contract registry.
