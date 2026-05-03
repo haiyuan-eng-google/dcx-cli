@@ -158,18 +158,19 @@ func runREPL(app *App, formatExplicit bool) error {
 
 		// Handle bare SQL.
 		var args []string
+		lower := strings.ToLower(input)
 		if isBareReadOnlySQL(input) {
 			sql := collectMultilineSQL(input, line)
 			args = []string{"jobs", "query", "--query", sql}
-		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isBareReadOnlySQL(input[8:]) {
+		} else if strings.HasPrefix(lower, "dry-run ") && isAnySQL(input[8:]) {
 			sql := collectMultilineSQL(input[8:], line)
 			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
-		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isWriteSQL(input[8:]) {
-			sql := collectMultilineSQL(input[8:], line)
-			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
-		} else if strings.HasPrefix(strings.ToLower(input), "run ") && isWriteSQL(input[4:]) {
+		} else if strings.HasPrefix(lower, "run ") && isAnySQL(input[4:]) {
 			sql := collectMultilineSQL(input[4:], line)
 			args = []string{"jobs", "query", "--query", sql}
+		} else if lower == "run" || lower == "dry-run" {
+			fmt.Fprintln(os.Stderr, "  usage: run <SQL statement>")
+			continue
 		} else if isWriteSQL(input) {
 			fmt.Fprintf(os.Stderr, "  DML/DDL requires explicit prefix: run %s\n", strings.Fields(input)[0])
 			fmt.Fprintln(os.Stderr, "  Use 'dry-run ...' to validate without executing.")
@@ -254,8 +255,12 @@ func handleBuiltin(input string, ctx *replContext) bool {
 		return true
 	}
 
-	if strings.HasPrefix(lower, "set ") {
-		handleSet(input[4:], ctx)
+	if lower == "set" || strings.HasPrefix(lower, "set ") {
+		rest := ""
+		if len(input) > 4 {
+			rest = input[4:]
+		}
+		handleSet(rest, ctx)
 		return true
 	}
 
@@ -369,6 +374,11 @@ func isBareReadOnlySQL(input string) bool {
 		strings.HasPrefix(upper, "WITH\n") ||
 		upper == "SELECT" ||
 		upper == "WITH"
+}
+
+// isAnySQL returns true if the input looks like any SQL statement (read or write).
+func isAnySQL(input string) bool {
+	return isBareReadOnlySQL(input) || isWriteSQL(input)
 }
 
 // isWriteSQL detects DML/DDL statements that modify data or schema.
