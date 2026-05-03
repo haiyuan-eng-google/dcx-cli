@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"golang.org/x/oauth2"
@@ -138,7 +139,7 @@ func Check(ctx context.Context, cfg Config) StatusResult {
 	}
 
 	// Try to obtain a token to verify credentials work.
-	_, tokenErr := resolved.TokenSource.Token()
+	tok, tokenErr := resolved.TokenSource.Token()
 	if tokenErr != nil {
 		return StatusResult{
 			Authenticated: false,
@@ -148,10 +149,44 @@ func Check(ctx context.Context, cfg Config) StatusResult {
 		}
 	}
 
+	// For static bearer tokens, Token() always succeeds (just returns the
+	// string). Verify with a live tokeninfo call to catch invalid tokens.
+	// Skip verification if DCX_SKIP_TOKEN_VERIFY is set (for testing).
+	if resolved.Method == "token" && os.Getenv("DCX_SKIP_TOKEN_VERIFY") == "" {
+		if err := verifyToken(ctx, tok.AccessToken); err != nil {
+			return StatusResult{
+				Authenticated: false,
+				Method:        resolved.Method,
+				Source:        resolved.Source,
+				Error:         err.Error(),
+			}
+		}
+	}
+
 	return StatusResult{
 		Authenticated: true,
 		Method:        resolved.Method,
 		Source:        resolved.Source,
 		ProjectID:     resolved.ProjectID,
 	}
+}
+
+// HTTPClient is the client used for token verification. Tests can override this.
+var HTTPClient = http.DefaultClient
+
+// verifyToken makes a lightweight tokeninfo call to verify the token is valid.
+func verifyToken(ctx context.Context, token string) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://oauth2.googleapis.com/tokeninfo?access_token="+token, nil)
+	if err != nil {
+		return fmt.Errorf("token verification failed: %w", err)
+	}
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("token verification failed: %w", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("token is invalid or expired (tokeninfo returned HTTP %d)", resp.StatusCode)
+	}
+	return nil
 }

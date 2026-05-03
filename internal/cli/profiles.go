@@ -87,8 +87,9 @@ func (a *App) profilesListCmd() *cobra.Command {
 
 func (a *App) profilesValidateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate",
-		Short: "Validate all configured source profiles",
+		Use:   "validate [profile-name]",
+		Short: "Validate source profiles (all or a specific one)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, err := a.OutputFormat()
 			if err != nil {
@@ -100,6 +101,23 @@ func (a *App) profilesValidateCmd() *cobra.Command {
 			if err != nil {
 				dcxerrors.Emit(dcxerrors.InvalidConfig, err.Error(), "Check "+profiles.ProfilesDir())
 				return nil
+			}
+
+			// Filter to specific profile if name given.
+			if len(args) == 1 {
+				name := args[0]
+				var found bool
+				for _, p := range all {
+					if p.Name == name {
+						all = []profiles.Profile{p}
+						found = true
+						break
+					}
+				}
+				if !found {
+					dcxerrors.Emit(dcxerrors.NotFound, "profile not found: "+name, "Run 'dcx profiles list' to see available profiles")
+					return nil
+				}
 			}
 
 			var results []profiles.ValidationResult

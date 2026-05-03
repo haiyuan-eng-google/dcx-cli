@@ -2,6 +2,8 @@ package output
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 )
 
@@ -50,7 +52,11 @@ func filterValue(raw interface{}, fields map[string]bool) interface{} {
 		filtered := make([]interface{}, 0, len(arr))
 		for _, item := range arr {
 			if m, ok := item.(map[string]interface{}); ok {
-				filtered = append(filtered, filterMap(m, fields))
+				result := filterMap(m, fields)
+				if len(result) == 0 && len(filtered) == 0 {
+					warnNoFieldMatch(m, fields)
+				}
+				filtered = append(filtered, result)
 			} else {
 				filtered = append(filtered, item)
 			}
@@ -71,7 +77,11 @@ func filterValue(raw interface{}, fields map[string]bool) interface{} {
 	}
 
 	// Single object: keep only matching keys.
-	return filterMap(m, fields)
+	result := filterMap(m, fields)
+	if len(result) == 0 && len(m) > 0 {
+		warnNoFieldMatch(m, fields)
+	}
+	return result
 }
 
 func filterListEnvelope(envelope map[string]interface{}, items []interface{}, fields map[string]bool) map[string]interface{} {
@@ -109,4 +119,25 @@ func filterMap(m map[string]interface{}, fields map[string]bool) map[string]inte
 		}
 	}
 	return result
+}
+
+// warnNoFieldMatch emits a one-time stderr warning when --output-fields
+// matched nothing in the top-level object.
+var fieldWarnEmitted bool
+
+func warnNoFieldMatch(m map[string]interface{}, fields map[string]bool) {
+	if fieldWarnEmitted {
+		return
+	}
+	available := make([]string, 0, len(m))
+	for k := range m {
+		available = append(available, k)
+	}
+	requested := make([]string, 0, len(fields))
+	for k := range fields {
+		requested = append(requested, k)
+	}
+	fmt.Fprintf(os.Stderr, "warning: --output-fields %s matched no fields (available: %s)\n",
+		strings.Join(requested, ","), strings.Join(available, ", "))
+	fieldWarnEmitted = true
 }
