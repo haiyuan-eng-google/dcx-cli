@@ -8,9 +8,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
 	"github.com/peterh/liner"
@@ -38,6 +41,7 @@ type replContext struct {
 	CredentialsFile string         // forwarded from parent --credentials-file
 	Retry           int            // forwarded from parent --retry
 	OutputFields    string         // forwarded from parent --output-fields
+	Transcript      *os.File       // transcript log file (nil when not recording)
 }
 
 // blockedCommands are interactive/server commands that shouldn't run in the REPL.
@@ -101,6 +105,14 @@ func runREPL(app *App, formatExplicit bool) error {
 		Format:          replDefaultFormat(app.Opts.Format, formatExplicit),
 	}
 
+	// Close transcript on exit if still open.
+	defer func() {
+		if ctx.Transcript != nil {
+			fmt.Fprintf(ctx.Transcript, "\n# dcx transcript ended %s\n", time.Now().Format(time.RFC3339))
+			ctx.Transcript.Close()
+		}
+	}()
+
 	line := liner.NewLiner()
 	defer line.Close()
 	line.SetCtrlCAborts(true)
@@ -118,7 +130,11 @@ func runREPL(app *App, formatExplicit bool) error {
 		prompt := "dcx> "
 		input, err := line.Prompt(prompt)
 		if err != nil {
-			// Ctrl-D or error
+			if err == liner.ErrPromptAborted {
+				// Ctrl-C at prompt — clear line and continue.
+				continue
+			}
+			// Ctrl-D or other error — exit.
 			fmt.Fprintln(os.Stderr)
 			return nil
 		}
@@ -142,18 +158,22 @@ func runREPL(app *App, formatExplicit bool) error {
 
 		// Handle bare SQL.
 		var args []string
+		lower := strings.ToLower(input)
 		if isBareReadOnlySQL(input) {
 			sql := collectMultilineSQL(input, line)
 			args = []string{"jobs", "query", "--query", sql}
-		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isBareReadOnlySQL(input[8:]) {
+		} else if strings.HasPrefix(lower, "dry-run ") && isAnySQL(input[8:]) {
 			sql := collectMultilineSQL(input[8:], line)
 			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
-		} else if strings.HasPrefix(strings.ToLower(input), "dry-run ") && isWriteSQL(input[8:]) {
-			sql := collectMultilineSQL(input[8:], line)
-			args = []string{"jobs", "query", "--query", sql, "--dry-run"}
-		} else if strings.HasPrefix(strings.ToLower(input), "run ") && isWriteSQL(input[4:]) {
+		} else if strings.HasPrefix(lower, "run ") && isAnySQL(input[4:]) {
 			sql := collectMultilineSQL(input[4:], line)
 			args = []string{"jobs", "query", "--query", sql}
+		} else if lower == "run" {
+			fmt.Fprintln(os.Stderr, "  usage: run <SQL statement>")
+			continue
+		} else if lower == "dry-run" {
+			fmt.Fprintln(os.Stderr, "  usage: dry-run <SQL statement>")
+			continue
 		} else if isWriteSQL(input) {
 			fmt.Fprintf(os.Stderr, "  DML/DDL requires explicit prefix: run %s\n", strings.Fields(input)[0])
 			fmt.Fprintln(os.Stderr, "  Use 'dry-run ...' to validate without executing.")
@@ -191,9 +211,14 @@ func runREPL(app *App, formatExplicit bool) error {
 		// Append format if not already specified.
 		args = appendFormatIfMissing(args, ctx.Format)
 
-		// Execute as subprocess with capture.
-		result := executeAndCapture(dcxBinary, args)
+		// Execute as subprocess with capture and signal handling.
+		cmdStart := time.Now()
+		result := executeWithSignal(dcxBinary, args)
+		cmdDuration := time.Since(cmdStart)
 		fmt.Println() // blank line after output for readability
+
+		// Log to transcript if active.
+		transcriptLog(&ctx, input, &result, cmdDuration)
 
 		// Update $last: successful JSON → update; successful non-JSON → clear; error → keep.
 		if result.ExitCode == 0 {
@@ -233,14 +258,23 @@ func handleBuiltin(input string, ctx *replContext) bool {
 		return true
 	}
 
-	if strings.HasPrefix(lower, "set ") {
-		handleSet(input[4:], ctx)
+	if lower == "set" || strings.HasPrefix(lower, "set ") {
+		rest := ""
+		if len(input) > 4 {
+			rest = input[4:]
+		}
+		handleSet(rest, ctx)
 		return true
 	}
 
 	if strings.HasPrefix(lower, "/format ") {
 		ctx.Format = strings.TrimSpace(input[8:])
 		fmt.Fprintf(os.Stderr, "  format: %s\n", ctx.Format)
+		return true
+	}
+
+	if strings.HasPrefix(lower, "/transcript") {
+		handleTranscript(strings.TrimSpace(input[len("/transcript"):]), ctx)
 		return true
 	}
 
@@ -345,6 +379,11 @@ func isBareReadOnlySQL(input string) bool {
 		upper == "WITH"
 }
 
+// isAnySQL returns true if the input looks like any SQL statement (read or write).
+func isAnySQL(input string) bool {
+	return isBareReadOnlySQL(input) || isWriteSQL(input)
+}
+
 // isWriteSQL detects DML/DDL statements that modify data or schema.
 func isWriteSQL(input string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(input))
@@ -419,19 +458,10 @@ func isBlockedCommand(args []string) bool {
 	if blockedCommands[args[0]] {
 		return true
 	}
-	// Block "spanner operations wait" and similar wait commands.
-	if len(args) >= 2 && args[len(args)-1] == "wait" {
+	// Block specific long-running wait commands by path.
+	// "spanner operations wait", "spanner databaseOperations wait", etc.
+	if len(args) >= 3 && args[0] == "spanner" && args[2] == "wait" {
 		return true
-	}
-	// More precise: check last subcommand segment.
-	for i := len(args) - 1; i >= 0; i-- {
-		if args[i] == "wait" && !strings.HasPrefix(args[i], "--") {
-			return true
-		}
-		if strings.HasPrefix(args[i], "--") {
-			continue
-		}
-		break
 	}
 	return false
 }
@@ -560,55 +590,6 @@ func appendFormatIfMissing(args []string, format string) []string {
 	return append(args, "--format", format)
 }
 
-// executeAndCapture runs a dcx subprocess, streaming stdout/stderr to the
-// terminal in real-time while also capturing them for $last and transcripts.
-func executeAndCapture(binary string, args []string) commandResult {
-	var stdoutBuf, stderrBuf bytes.Buffer
-
-	cmd := exec.CommandContext(context.Background(), binary, args...)
-	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = os.Stdin
-
-	err := cmd.Run()
-
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-
-	stdout := stdoutBuf.String()
-
-	// Try to parse stdout as JSON for $last. Use json.Number to
-	// preserve large int64 values without float64 precision loss.
-	var parsed interface{}
-	trimmed := strings.TrimSpace(stdout)
-	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		dec := json.NewDecoder(strings.NewReader(trimmed))
-		dec.UseNumber()
-		if dec.Decode(&parsed) == nil {
-			// Any second-decode result other than io.EOF means trailing content.
-			var extra json.RawMessage
-			if dec.Decode(&extra) != io.EOF {
-				parsed = nil // trailing content — not clean JSON
-			}
-		} else {
-			parsed = nil
-		}
-	}
-
-	return commandResult{
-		Stdout:   stdout,
-		Stderr:   stderrBuf.String(),
-		ExitCode: exitCode,
-		JSON:     parsed,
-	}
-}
-
 // expandLastRefs replaces $last and $last.path.to.field references in args.
 func expandLastRefs(args []string, last *commandResult) ([]string, error) {
 	result := make([]string, len(args))
@@ -726,6 +707,176 @@ func isDigitsOnly(s string) bool {
 		}
 	}
 	return true
+}
+
+// executeWithSignal runs a subprocess with Ctrl-C forwarding.
+// Ctrl-C during execution cancels the child process and returns to the prompt.
+func executeWithSignal(binary string, args []string) commandResult {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+
+	// Intercept SIGINT during child execution.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	defer signal.Stop(sigCh)
+
+	// Start the command.
+	if err := cmd.Start(); err != nil {
+		return commandResult{ExitCode: 1, Stderr: err.Error()}
+	}
+
+	// Wait for command or signal.
+	doneCh := make(chan error, 1)
+	go func() { doneCh <- cmd.Wait() }()
+
+	var err error
+	select {
+	case err = <-doneCh:
+		// Command finished normally.
+	case <-sigCh:
+		// Ctrl-C received — kill the child.
+		cancel()
+		err = <-doneCh // wait for cleanup
+		fmt.Fprintln(os.Stderr, "\n  interrupted")
+	}
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+
+	// Try to parse stdout as JSON for $last.
+	var parsed interface{}
+	trimmed := strings.TrimSpace(stdout)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		dec := json.NewDecoder(strings.NewReader(trimmed))
+		dec.UseNumber()
+		if dec.Decode(&parsed) == nil {
+			var extra json.RawMessage
+			if dec.Decode(&extra) != io.EOF {
+				parsed = nil
+			}
+		} else {
+			parsed = nil
+		}
+	}
+
+	return commandResult{
+		Stdout:   stdout,
+		Stderr:   stderrBuf.String(),
+		ExitCode: exitCode,
+		JSON:     parsed,
+	}
+}
+
+// handleTranscript processes /transcript start|stop commands.
+func handleTranscript(rest string, ctx *replContext) {
+	parts := parseLineToArgv(rest)
+	if len(parts) == 0 {
+		if ctx.Transcript != nil {
+			fmt.Fprintf(os.Stderr, "  transcript: recording to %s\n", ctx.Transcript.Name())
+		} else {
+			fmt.Fprintln(os.Stderr, "  transcript: off")
+			fmt.Fprintln(os.Stderr, "  usage: /transcript start <path>")
+		}
+		return
+	}
+
+	switch strings.ToLower(parts[0]) {
+	case "start":
+		if len(parts) < 2 {
+			fmt.Fprintln(os.Stderr, "  usage: /transcript start <path>")
+			return
+		}
+		if ctx.Transcript != nil {
+			fmt.Fprintf(os.Stderr, "  transcript already recording to %s (stop first)\n", ctx.Transcript.Name())
+			return
+		}
+		path := parts[1]
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  transcript error: %v\n", err)
+			return
+		}
+		ctx.Transcript = f
+		fmt.Fprintf(f, "# dcx transcript started %s\n\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(os.Stderr, "  transcript: recording to %s\n", path)
+
+	case "stop":
+		if ctx.Transcript == nil {
+			fmt.Fprintln(os.Stderr, "  transcript: not recording")
+			return
+		}
+		fmt.Fprintf(ctx.Transcript, "\n# dcx transcript ended %s\n", time.Now().Format(time.RFC3339))
+		ctx.Transcript.Close()
+		fmt.Fprintf(os.Stderr, "  transcript: stopped\n")
+		ctx.Transcript = nil
+
+	default:
+		fmt.Fprintln(os.Stderr, "  usage: /transcript start <path> | /transcript stop")
+	}
+}
+
+// transcriptLog writes a command and its result to the transcript file.
+func transcriptLog(ctx *replContext, input string, result *commandResult, duration time.Duration) {
+	if ctx.Transcript == nil {
+		return
+	}
+	f := ctx.Transcript
+
+	// Per-command timestamp and duration.
+	fmt.Fprintf(f, "# %s (%s)\n", time.Now().Format(time.RFC3339), duration.Round(time.Millisecond))
+
+	// Redact secrets from the input command line only.
+	fmt.Fprintf(f, "dcx> %s\n", redactInputLine(input))
+
+	// Stdout/stderr are logged verbatim — they don't contain user-supplied
+	// secrets (tokens come from flags/env, not API responses).
+	if result.Stdout != "" {
+		fmt.Fprintf(f, "%s\n", result.Stdout)
+	}
+	if result.Stderr != "" {
+		fmt.Fprintf(f, "[stderr] %s\n", result.Stderr)
+	}
+	fmt.Fprintf(f, "[exit %d]\n\n", result.ExitCode)
+}
+
+// redactInputLine redacts secret flag values from a REPL input command line.
+// Uses the same quote-aware parser as command execution to handle quoted values.
+func redactInputLine(input string) string {
+	args := parseLineToArgv(input)
+	for i, f := range args {
+		// --token=VALUE
+		if strings.HasPrefix(f, "--token=") {
+			args[i] = "--token=***"
+		}
+		// --token VALUE (next arg is the value, even if it was quoted)
+		if f == "--token" && i+1 < len(args) {
+			args[i+1] = "***"
+		}
+		// --credentials-file=PATH
+		if strings.HasPrefix(f, "--credentials-file=") {
+			args[i] = "--credentials-file=***"
+		}
+		// --credentials-file PATH
+		if f == "--credentials-file" && i+1 < len(args) {
+			args[i+1] = "***"
+		}
+	}
+	return strings.Join(args, " ")
 }
 
 // buildCompleter creates a tab completion function from the contract registry.
