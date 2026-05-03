@@ -8,9 +8,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
 	"github.com/peterh/liner"
@@ -38,6 +41,7 @@ type replContext struct {
 	CredentialsFile string         // forwarded from parent --credentials-file
 	Retry           int            // forwarded from parent --retry
 	OutputFields    string         // forwarded from parent --output-fields
+	Transcript      *os.File       // transcript log file (nil when not recording)
 }
 
 // blockedCommands are interactive/server commands that shouldn't run in the REPL.
@@ -100,6 +104,14 @@ func runREPL(app *App, formatExplicit bool) error {
 		OutputFields:    app.Opts.OutputFields,
 		Format:          replDefaultFormat(app.Opts.Format, formatExplicit),
 	}
+
+	// Close transcript on exit if still open.
+	defer func() {
+		if ctx.Transcript != nil {
+			fmt.Fprintf(ctx.Transcript, "\n# dcx transcript ended %s\n", time.Now().Format(time.RFC3339))
+			ctx.Transcript.Close()
+		}
+	}()
 
 	line := liner.NewLiner()
 	defer line.Close()
@@ -191,9 +203,12 @@ func runREPL(app *App, formatExplicit bool) error {
 		// Append format if not already specified.
 		args = appendFormatIfMissing(args, ctx.Format)
 
-		// Execute as subprocess with capture.
-		result := executeAndCapture(dcxBinary, args)
+		// Execute as subprocess with capture and signal handling.
+		result := executeWithSignal(dcxBinary, args)
 		fmt.Println() // blank line after output for readability
+
+		// Log to transcript if active.
+		transcriptLog(&ctx, input, &result)
 
 		// Update $last: successful JSON → update; successful non-JSON → clear; error → keep.
 		if result.ExitCode == 0 {
@@ -241,6 +256,11 @@ func handleBuiltin(input string, ctx *replContext) bool {
 	if strings.HasPrefix(lower, "/format ") {
 		ctx.Format = strings.TrimSpace(input[8:])
 		fmt.Fprintf(os.Stderr, "  format: %s\n", ctx.Format)
+		return true
+	}
+
+	if strings.HasPrefix(lower, "/transcript") {
+		handleTranscript(strings.TrimSpace(input[len("/transcript"):]), ctx)
 		return true
 	}
 
@@ -560,55 +580,6 @@ func appendFormatIfMissing(args []string, format string) []string {
 	return append(args, "--format", format)
 }
 
-// executeAndCapture runs a dcx subprocess, streaming stdout/stderr to the
-// terminal in real-time while also capturing them for $last and transcripts.
-func executeAndCapture(binary string, args []string) commandResult {
-	var stdoutBuf, stderrBuf bytes.Buffer
-
-	cmd := exec.CommandContext(context.Background(), binary, args...)
-	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	cmd.Stdin = os.Stdin
-
-	err := cmd.Run()
-
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
-
-	stdout := stdoutBuf.String()
-
-	// Try to parse stdout as JSON for $last. Use json.Number to
-	// preserve large int64 values without float64 precision loss.
-	var parsed interface{}
-	trimmed := strings.TrimSpace(stdout)
-	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-		dec := json.NewDecoder(strings.NewReader(trimmed))
-		dec.UseNumber()
-		if dec.Decode(&parsed) == nil {
-			// Any second-decode result other than io.EOF means trailing content.
-			var extra json.RawMessage
-			if dec.Decode(&extra) != io.EOF {
-				parsed = nil // trailing content — not clean JSON
-			}
-		} else {
-			parsed = nil
-		}
-	}
-
-	return commandResult{
-		Stdout:   stdout,
-		Stderr:   stderrBuf.String(),
-		ExitCode: exitCode,
-		JSON:     parsed,
-	}
-}
-
 // expandLastRefs replaces $last and $last.path.to.field references in args.
 func expandLastRefs(args []string, last *commandResult) ([]string, error) {
 	result := make([]string, len(args))
@@ -726,6 +697,164 @@ func isDigitsOnly(s string) bool {
 		}
 	}
 	return true
+}
+
+// executeWithSignal runs a subprocess with Ctrl-C forwarding.
+// Ctrl-C during execution cancels the child process and returns to the prompt.
+func executeWithSignal(binary string, args []string) commandResult {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	cmd.Stdin = os.Stdin
+
+	// Intercept SIGINT during child execution.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	defer signal.Stop(sigCh)
+
+	// Start the command.
+	if err := cmd.Start(); err != nil {
+		return commandResult{ExitCode: 1, Stderr: err.Error()}
+	}
+
+	// Wait for command or signal.
+	doneCh := make(chan error, 1)
+	go func() { doneCh <- cmd.Wait() }()
+
+	var err error
+	select {
+	case err = <-doneCh:
+		// Command finished normally.
+	case <-sigCh:
+		// Ctrl-C received — kill the child.
+		cancel()
+		err = <-doneCh // wait for cleanup
+		fmt.Fprintln(os.Stderr, "\n  interrupted")
+	}
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+
+	// Try to parse stdout as JSON for $last.
+	var parsed interface{}
+	trimmed := strings.TrimSpace(stdout)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		dec := json.NewDecoder(strings.NewReader(trimmed))
+		dec.UseNumber()
+		if dec.Decode(&parsed) == nil {
+			var extra json.RawMessage
+			if dec.Decode(&extra) != io.EOF {
+				parsed = nil
+			}
+		} else {
+			parsed = nil
+		}
+	}
+
+	return commandResult{
+		Stdout:   stdout,
+		Stderr:   stderrBuf.String(),
+		ExitCode: exitCode,
+		JSON:     parsed,
+	}
+}
+
+// handleTranscript processes /transcript start|stop commands.
+func handleTranscript(rest string, ctx *replContext) {
+	parts := strings.Fields(rest)
+	if len(parts) == 0 {
+		if ctx.Transcript != nil {
+			fmt.Fprintf(os.Stderr, "  transcript: recording to %s\n", ctx.Transcript.Name())
+		} else {
+			fmt.Fprintln(os.Stderr, "  transcript: off")
+			fmt.Fprintln(os.Stderr, "  usage: /transcript start <path>")
+		}
+		return
+	}
+
+	switch strings.ToLower(parts[0]) {
+	case "start":
+		if len(parts) < 2 {
+			fmt.Fprintln(os.Stderr, "  usage: /transcript start <path>")
+			return
+		}
+		if ctx.Transcript != nil {
+			fmt.Fprintf(os.Stderr, "  transcript already recording to %s (stop first)\n", ctx.Transcript.Name())
+			return
+		}
+		path := parts[1]
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  transcript error: %v\n", err)
+			return
+		}
+		ctx.Transcript = f
+		fmt.Fprintf(f, "# dcx transcript started %s\n\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(os.Stderr, "  transcript: recording to %s\n", path)
+
+	case "stop":
+		if ctx.Transcript == nil {
+			fmt.Fprintln(os.Stderr, "  transcript: not recording")
+			return
+		}
+		fmt.Fprintf(ctx.Transcript, "\n# dcx transcript ended %s\n", time.Now().Format(time.RFC3339))
+		ctx.Transcript.Close()
+		fmt.Fprintf(os.Stderr, "  transcript: stopped\n")
+		ctx.Transcript = nil
+
+	default:
+		fmt.Fprintln(os.Stderr, "  usage: /transcript start <path> | /transcript stop")
+	}
+}
+
+// transcriptLog writes a command and its result to the transcript file.
+func transcriptLog(ctx *replContext, input string, result *commandResult) {
+	if ctx.Transcript == nil {
+		return
+	}
+	f := ctx.Transcript
+
+	// Redact --token values from the logged input.
+	redacted := redactTokens(input)
+	fmt.Fprintf(f, "dcx> %s\n", redacted)
+
+	if result.Stdout != "" {
+		fmt.Fprintf(f, "%s\n", result.Stdout)
+	}
+	if result.Stderr != "" {
+		fmt.Fprintf(f, "[stderr] %s\n", result.Stderr)
+	}
+	if result.ExitCode != 0 {
+		fmt.Fprintf(f, "[exit %d]\n", result.ExitCode)
+	}
+	fmt.Fprintln(f)
+}
+
+// redactTokens replaces --token values and known secret patterns.
+func redactTokens(input string) string {
+	// Redact --token=VALUE and --token VALUE patterns.
+	fields := strings.Fields(input)
+	for i, f := range fields {
+		if strings.HasPrefix(f, "--token=") {
+			fields[i] = "--token=***"
+		} else if f == "--token" && i+1 < len(fields) {
+			fields[i+1] = "***"
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 // buildCompleter creates a tab completion function from the contract registry.
