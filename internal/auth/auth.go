@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -182,8 +183,9 @@ func verifyToken(ctx context.Context, token string) error {
 	if err != nil {
 		return fmt.Errorf("token verification request failed")
 	}
+	body := url.Values{"access_token": {token}}.Encode()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Body = io.NopCloser(strings.NewReader("access_token=" + token))
+	req.Body = io.NopCloser(strings.NewReader(body))
 	resp, err := HTTPClient.Do(req)
 	if err != nil {
 		// Don't wrap the error — it may contain the URL or request details.
