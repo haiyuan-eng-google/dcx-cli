@@ -97,13 +97,8 @@ func (a *App) profilesValidateCmd() *cobra.Command {
 				return nil
 			}
 
-			all, err := profiles.LoadAll()
-			if err != nil {
-				dcxerrors.Emit(dcxerrors.InvalidConfig, err.Error(), "Check "+profiles.ProfilesDir())
-				return nil
-			}
-
-			// Filter to specific profile if name given (supports filename, YAML name, or path).
+			// Load specific profile or all profiles.
+			var all []profiles.Profile
 			if len(args) == 1 {
 				p, err := profiles.LoadByName(args[0])
 				if err != nil {
@@ -111,6 +106,13 @@ func (a *App) profilesValidateCmd() *cobra.Command {
 					return nil
 				}
 				all = []profiles.Profile{*p}
+			} else {
+				var err error
+				all, err = profiles.LoadAll()
+				if err != nil {
+					dcxerrors.Emit(dcxerrors.InvalidConfig, err.Error(), "Check "+profiles.ProfilesDir())
+					return nil
+				}
 			}
 
 			var results []profiles.ValidationResult

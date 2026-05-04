@@ -85,15 +85,24 @@ func filterValue(raw interface{}, fields map[string]bool) interface{} {
 }
 
 func filterListEnvelope(envelope map[string]interface{}, items []interface{}, fields map[string]bool) map[string]interface{} {
-	// Envelope keys to always preserve.
+	// Always-preserved envelope metadata keys.
 	envelopeKeys := map[string]bool{
 		"source": true, "next_page_token": true, "items": true,
 	}
 
 	result := make(map[string]interface{})
 	for k, v := range envelope {
-		if envelopeKeys[k] {
+		// Preserve structural keys and any envelope field the user requested.
+		if envelopeKeys[k] || fields[k] {
 			result[k] = v
+		}
+	}
+
+	// Check which requested fields matched at envelope level.
+	envelopeMatched := 0
+	for f := range fields {
+		if _, ok := envelope[f]; ok {
+			envelopeMatched++
 		}
 	}
 
@@ -103,7 +112,8 @@ func filterListEnvelope(envelope map[string]interface{}, items []interface{}, fi
 	for _, item := range items {
 		if m, ok := item.(map[string]interface{}); ok {
 			fm := filterMap(m, fields)
-			if !warned && len(fm) == 0 && len(m) > 0 {
+			// Only warn if no fields matched at either envelope or item level.
+			if !warned && len(fm) == 0 && len(m) > 0 && envelopeMatched == 0 {
 				warnNoFieldMatch(m, fields)
 				warned = true
 			}
