@@ -268,8 +268,14 @@ func handleBuiltin(input string, ctx *replContext) bool {
 	}
 
 	if strings.HasPrefix(lower, "/format ") {
-		ctx.Format = strings.TrimSpace(input[8:])
-		fmt.Fprintf(os.Stderr, "  format: %s\n", ctx.Format)
+		candidate := strings.TrimSpace(input[8:])
+		switch candidate {
+		case "json", "json-minified", "table", "text":
+			ctx.Format = candidate
+			fmt.Fprintf(os.Stderr, "  format: %s\n", ctx.Format)
+		default:
+			fmt.Fprintf(os.Stderr, "  invalid format %q; valid: json, json-minified, table, text\n", candidate)
+		}
 		return true
 	}
 

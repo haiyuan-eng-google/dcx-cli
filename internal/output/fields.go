@@ -2,6 +2,8 @@ package output
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 )
 
@@ -45,6 +47,23 @@ func parseFieldSet(fields string) map[string]bool {
 }
 
 func filterValue(raw interface{}, fields map[string]bool) interface{} {
+	// Bare array: filter each element.
+	if arr, ok := raw.([]interface{}); ok {
+		filtered := make([]interface{}, 0, len(arr))
+		for _, item := range arr {
+			if m, ok := item.(map[string]interface{}); ok {
+				result := filterMap(m, fields)
+				if len(result) == 0 && len(filtered) == 0 {
+					warnNoFieldMatch(m, fields)
+				}
+				filtered = append(filtered, result)
+			} else {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered
+	}
+
 	m, ok := raw.(map[string]interface{})
 	if !ok {
 		return raw
@@ -58,27 +77,47 @@ func filterValue(raw interface{}, fields map[string]bool) interface{} {
 	}
 
 	// Single object: keep only matching keys.
-	return filterMap(m, fields)
+	result := filterMap(m, fields)
+	if len(result) == 0 && len(m) > 0 {
+		warnNoFieldMatch(m, fields)
+	}
+	return result
 }
 
 func filterListEnvelope(envelope map[string]interface{}, items []interface{}, fields map[string]bool) map[string]interface{} {
-	// Envelope keys to always preserve.
+	// Always-preserved envelope metadata keys.
 	envelopeKeys := map[string]bool{
 		"source": true, "next_page_token": true, "items": true,
 	}
 
 	result := make(map[string]interface{})
 	for k, v := range envelope {
-		if envelopeKeys[k] {
+		// Preserve structural keys and any envelope field the user requested.
+		if envelopeKeys[k] || fields[k] {
 			result[k] = v
+		}
+	}
+
+	// Check which requested fields matched at envelope level.
+	envelopeMatched := 0
+	for f := range fields {
+		if _, ok := envelope[f]; ok {
+			envelopeMatched++
 		}
 	}
 
 	// Filter each item.
 	filtered := make([]interface{}, 0, len(items))
+	warned := false
 	for _, item := range items {
 		if m, ok := item.(map[string]interface{}); ok {
-			filtered = append(filtered, filterMap(m, fields))
+			fm := filterMap(m, fields)
+			// Only warn if no fields matched at either envelope or item level.
+			if !warned && len(fm) == 0 && len(m) > 0 && envelopeMatched == 0 {
+				warnNoFieldMatch(m, fields)
+				warned = true
+			}
+			filtered = append(filtered, fm)
 		} else {
 			filtered = append(filtered, item)
 		}
@@ -96,4 +135,25 @@ func filterMap(m map[string]interface{}, fields map[string]bool) map[string]inte
 		}
 	}
 	return result
+}
+
+// warnNoFieldMatch emits a one-time stderr warning when --output-fields
+// matched nothing in the top-level object.
+var fieldWarnEmitted bool
+
+func warnNoFieldMatch(m map[string]interface{}, fields map[string]bool) {
+	if fieldWarnEmitted {
+		return
+	}
+	available := make([]string, 0, len(m))
+	for k := range m {
+		available = append(available, k)
+	}
+	requested := make([]string, 0, len(fields))
+	for k := range fields {
+		requested = append(requested, k)
+	}
+	fmt.Fprintf(os.Stderr, "warning: --output-fields %s matched no fields (available: %s)\n",
+		strings.Join(requested, ","), strings.Join(available, ", "))
+	fieldWarnEmitted = true
 }

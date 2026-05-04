@@ -49,6 +49,7 @@ func cleanEnv() []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=/tmp/dcx-eval-nonexistent",
+		"DCX_SKIP_TOKEN_VERIFY=1",
 	}
 }
 
