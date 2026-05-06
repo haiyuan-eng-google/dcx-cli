@@ -563,12 +563,19 @@ func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bo
 
 // renderCAMetadata renders non-data/schema keys from a CA result map.
 func renderCAMetadata(w *os.File, m map[string]interface{}, prefix string) {
-	// Determine indent level from prefix.
-	indent := len(prefix) / 2
-	for k, v := range m {
+	// Collect and sort keys for stable output.
+	keys := make([]string, 0, len(m))
+	for k := range m {
 		if k == "data" || k == "schema" {
 			continue
 		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	indent := len(prefix) / 2
+	for _, k := range keys {
+		v := m[k]
 		switch v.(type) {
 		case map[string]interface{}, []interface{}:
 			fmt.Fprintf(w, "%s%s:\n", prefix, Sanitize(k))
