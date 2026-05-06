@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -473,6 +474,134 @@ func TestResourceRead_CommandURIPathConversion(t *testing.T) {
 		if back != tt.command {
 			t.Errorf("path %q → command %q, want %q", tt.path, back, tt.command)
 		}
+	}
+}
+
+// Result compaction tests.
+
+func TestCompactResult_ListEnvelope(t *testing.T) {
+	data := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"_resource_id": "a", "location": "US"},
+			map[string]interface{}{"_resource_id": "b", "location": "EU"},
+			map[string]interface{}{"_resource_id": "c", "location": "US"},
+			map[string]interface{}{"_resource_id": "d", "location": "EU"},
+		},
+		"source": "BigQuery",
+	}
+
+	result := compactResult(data, "compact")
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("compact result should be a map, got %T", result)
+	}
+	if m["count"] != 4 {
+		t.Errorf("count = %v, want 4", m["count"])
+	}
+	sample, ok := m["sample"].([]interface{})
+	if !ok || len(sample) != 3 {
+		t.Errorf("sample should have 3 items, got %v", m["sample"])
+	}
+	if m["source"] != "BigQuery" {
+		t.Errorf("source should be preserved, got %v", m["source"])
+	}
+}
+
+func TestCompactResult_CountOnly(t *testing.T) {
+	data := map[string]interface{}{
+		"items":  []interface{}{1, 2, 3, 4, 5},
+		"source": "test",
+	}
+
+	result := compactResult(data, "count_only")
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("count_only result should be a map, got %T", result)
+	}
+	if m["count"] != 5 {
+		t.Errorf("count = %v, want 5", m["count"])
+	}
+	if m["source"] != "test" {
+		t.Errorf("source should be preserved")
+	}
+	if _, has := m["items"]; has {
+		t.Error("count_only should not include items")
+	}
+}
+
+func TestCompactResult_SchemaOnly(t *testing.T) {
+	data := map[string]interface{}{
+		"items": []interface{}{
+			map[string]interface{}{"name": "alice", "age": json.Number("30"), "active": true},
+		},
+	}
+
+	result := compactResult(data, "schema_only")
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("schema_only result should be a map, got %T", result)
+	}
+	fields, ok := m["fields"].([]map[string]string)
+	if !ok {
+		t.Fatalf("fields should be []map[string]string, got %T", m["fields"])
+	}
+	if len(fields) != 3 {
+		t.Errorf("expected 3 fields, got %d", len(fields))
+	}
+	// Fields should be sorted.
+	if fields[0]["name"] != "active" || fields[1]["name"] != "age" || fields[2]["name"] != "name" {
+		t.Errorf("fields not sorted: %v", fields)
+	}
+}
+
+func TestCompactResult_EmptyList(t *testing.T) {
+	data := map[string]interface{}{
+		"items":  []interface{}{},
+		"source": "test",
+	}
+
+	compact := compactResult(data, "compact")
+	m := compact.(map[string]interface{})
+	if m["count"] != 0 {
+		t.Errorf("compact empty list: count = %v, want 0", m["count"])
+	}
+
+	countOnly := compactResult(data, "count_only")
+	m2 := countOnly.(map[string]interface{})
+	if m2["count"] != 0 {
+		t.Errorf("count_only empty list: count = %v, want 0", m2["count"])
+	}
+
+	schemaOnly := compactResult(data, "schema_only")
+	m3 := schemaOnly.(map[string]interface{})
+	if m3["item_count"] != 0 {
+		t.Errorf("schema_only empty list: item_count = %v, want 0", m3["item_count"])
+	}
+}
+
+func TestCompactResult_SingleObject(t *testing.T) {
+	data := map[string]interface{}{
+		"name":   "test",
+		"status": "ok",
+	}
+
+	compact := compactResult(data, "compact")
+	m := compact.(map[string]interface{})
+	keys, ok := m["keys"].([]string)
+	if !ok {
+		t.Fatalf("compact single object should return keys, got %T", m["keys"])
+	}
+	if len(keys) != 2 {
+		t.Errorf("expected 2 keys, got %d", len(keys))
+	}
+}
+
+func TestCompactResult_FullPassthrough(t *testing.T) {
+	data := map[string]interface{}{"x": 1}
+	result := compactResult(data, "full")
+	m, ok := result.(map[string]interface{})
+	if !ok || m["x"] != 1 {
+		t.Error("full mode should return data unchanged")
 	}
 }
 
