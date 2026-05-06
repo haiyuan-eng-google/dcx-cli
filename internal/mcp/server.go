@@ -346,6 +346,31 @@ func (s *Server) handleDiscover(req JSONRPCRequest, params ToolCallParams) {
 		Description string `json:"description"`
 	}
 
+	// Validate domain against available domains if specified.
+	if domainFilter != "" {
+		validDomain := false
+		for _, c := range s.Registry.All() {
+			if _, err := s.CanExecuteMCPCommand(c.Command); err == nil && c.Domain == domainFilter {
+				validDomain = true
+				break
+			}
+		}
+		if !validDomain {
+			var available []string
+			seen := make(map[string]bool)
+			for _, c := range s.Registry.All() {
+				if _, err := s.CanExecuteMCPCommand(c.Command); err == nil && !seen[c.Domain] {
+					available = append(available, c.Domain)
+					seen[c.Domain] = true
+				}
+			}
+			sort.Strings(available)
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("unknown domain %q; available: %s", domainFilter, strings.Join(available, ", ")))
+			return
+		}
+	}
+
 	var commands []cmdSummary
 	for _, c := range s.Registry.All() {
 		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
