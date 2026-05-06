@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -639,11 +640,15 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 			sv, ok := v.(string)
 			if ok && strings.Contains(sv, "$prev") {
 				if prevJSON == nil {
+					msg := "$prev referenced but no previous result"
+					if i > 0 {
+						msg = "$prev referenced but previous step did not produce valid JSON"
+					}
 					results = append(results, batchStepResult{
 						Step:     i,
 						Command:  step.Command,
 						ExitCode: 1,
-						Error:    fmt.Sprintf("$prev referenced but no previous result (step %d)", i),
+						Error:    fmt.Sprintf("step %d: %s", i, msg),
 					})
 					goto done // fail-fast
 				}
@@ -702,13 +707,19 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				goto done
 			}
 
-			// Parse JSON for $prev.
+			// Parse JSON for $prev. Enforce EOF to reject trailing
+			// content (matches $last EOF enforcement in REPL).
 			var parsed interface{}
 			trimmed := strings.TrimSpace(string(output))
 			if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
 				dec := json.NewDecoder(strings.NewReader(trimmed))
 				dec.UseNumber()
-				if dec.Decode(&parsed) != nil {
+				if dec.Decode(&parsed) == nil {
+					var extra json.RawMessage
+					if dec.Decode(&extra) != io.EOF {
+						parsed = nil // trailing content — not clean JSON
+					}
+				} else {
 					parsed = nil
 				}
 			}
@@ -730,10 +741,11 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				goto done
 			}
 
-			// Update $prev for next step.
-			if parsed != nil {
-				prevJSON = parsed
-			}
+			// Update $prev for next step. Always update so $prev
+			// reflects the immediate previous step, not a stale earlier one.
+			// If the step produced no JSON, $prev becomes nil and later
+			// $prev references will fail with "did not produce JSON".
+			prevJSON = parsed
 		}
 	}
 

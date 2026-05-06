@@ -59,7 +59,7 @@ func Resolve(data interface{}, path string) (string, error) {
 			}
 			value = arr[index]
 		} else {
-			break
+			return "", fmt.Errorf("invalid path segment near %q", path)
 		}
 	}
 
