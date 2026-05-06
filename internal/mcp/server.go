@@ -154,10 +154,13 @@ var blockedDomains = map[string]bool{
 // Returns the canonical contract or an error. Used by tools/list, tools/call,
 // and future progressive/batch modes.
 func (s *Server) CanExecuteMCPCommand(command string) (*contracts.CommandContract, error) {
-	// Normalize: trim, strip "dcx " prefix, rejoin.
-	cmd := strings.TrimSpace(command)
-	cmd = strings.TrimPrefix(cmd, "dcx ")
-	cmd = "dcx " + strings.Join(strings.Fields(cmd), " ")
+	// Normalize: tokenize first (splits on all whitespace including tabs),
+	// strip leading "dcx" token if present, rejoin with single spaces.
+	tokens := strings.Fields(command)
+	if len(tokens) > 0 && tokens[0] == "dcx" {
+		tokens = tokens[1:]
+	}
+	cmd := "dcx " + strings.Join(tokens, " ")
 
 	contract, ok := s.Registry.Get(cmd)
 	if !ok {
@@ -260,12 +263,17 @@ func (s *Server) writeError(id interface{}, code int, message, data string) {
 	fmt.Fprintln(os.Stdout, string(respData))
 }
 
-// validateRequiredPositionals checks that required positional args are present.
+// validateRequiredPositionals checks that required positional args are present
+// and non-empty (rejects nil, "", and whitespace-only values).
 func (s *Server) validateRequiredPositionals(contract *contracts.CommandContract, args map[string]interface{}) error {
 	for _, f := range contract.Flags {
 		if f.Positional && f.Required {
-			if _, ok := args[f.Name]; !ok {
+			v, ok := args[f.Name]
+			if !ok || v == nil {
 				return fmt.Errorf("required positional argument %q is missing", f.Name)
+			}
+			if sv := strings.TrimSpace(fmt.Sprintf("%v", v)); sv == "" {
+				return fmt.Errorf("required positional argument %q is empty", f.Name)
 			}
 		}
 	}

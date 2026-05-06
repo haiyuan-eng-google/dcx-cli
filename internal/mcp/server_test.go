@@ -26,6 +26,14 @@ func testRegistry() *contracts.Registry {
 	}
 	r.Register(contracts.BuildContract("ca ask", "ca", "Ask a question", caFlags, false, false))
 
+	// Fake command with two positionals to test ordering.
+	twoPositionalFlags := []contracts.FlagContract{
+		{Name: "source", Type: "string", Description: "Source", Required: true, Positional: true},
+		{Name: "destination", Type: "string", Description: "Destination", Required: true, Positional: true},
+		{Name: "verbose", Type: "bool", Description: "Verbose"},
+	}
+	r.Register(contracts.BuildContract("data copy", "bigquery", "Copy data", twoPositionalFlags, false, false))
+
 	return r
 }
 
@@ -151,6 +159,71 @@ func TestBuildToolCallArgs_PositionalInContractOrder(t *testing.T) {
 		if a == "--question" {
 			t.Errorf("positional arg 'question' should not be a flag\nfull: %v", result)
 		}
+	}
+}
+
+func TestBuildToolCallArgs_TwoPositionalsInContractOrder(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx")
+	contract, _ := s.CanExecuteMCPCommand("data copy")
+
+	args := map[string]interface{}{
+		"destination": "dest_table",   // listed second in contract
+		"source":      "source_table", // listed first in contract
+		"verbose":     "true",
+	}
+
+	result := s.buildArgs(contract, "dcx_data_copy", args)
+	// Positionals must be in contract order: source first, destination second.
+	// Flags before positionals.
+	n := len(result)
+	if n < 2 {
+		t.Fatalf("expected at least 2 positional args, got %v", result)
+	}
+	if result[n-2] != "source_table" {
+		t.Errorf("first positional should be 'source_table', got %q\nfull: %v", result[n-2], result)
+	}
+	if result[n-1] != "dest_table" {
+		t.Errorf("second positional should be 'dest_table', got %q\nfull: %v", result[n-1], result)
+	}
+	// --verbose should be before positionals
+	for _, a := range result {
+		if a == "--source" || a == "--destination" {
+			t.Errorf("positional args should not appear as flags\nfull: %v", result)
+		}
+	}
+}
+
+func TestValidateRequiredPositionals_EmptyValues(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx")
+	contract, _ := s.CanExecuteMCPCommand("ca ask")
+
+	tests := []struct {
+		name string
+		args map[string]interface{}
+	}{
+		{"missing key", map[string]interface{}{"agent": "a"}},
+		{"nil value", map[string]interface{}{"question": nil, "agent": "a"}},
+		{"empty string", map[string]interface{}{"question": "", "agent": "a"}},
+		{"whitespace only", map[string]interface{}{"question": "   ", "agent": "a"}},
+	}
+	for _, tt := range tests {
+		err := s.validateRequiredPositionals(contract, tt.args)
+		if err == nil {
+			t.Errorf("%s: expected error, got nil", tt.name)
+		}
+	}
+}
+
+func TestCanExecuteMCPCommand_TabWhitespace(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx")
+
+	// Tab-separated should normalize correctly.
+	c, err := s.CanExecuteMCPCommand("dcx\tdatasets\tlist")
+	if err != nil {
+		t.Errorf("tab-separated command failed: %v", err)
+	}
+	if c != nil && c.Command != "dcx datasets list" {
+		t.Errorf("resolved to %q, want %q", c.Command, "dcx datasets list")
 	}
 }
 
