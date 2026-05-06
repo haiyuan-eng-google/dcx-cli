@@ -279,6 +279,11 @@ func (s *Server) handleToolsListProgressive(req JSONRPCRequest) {
 						"type":        "object",
 						"description": "Command arguments as key-value pairs",
 					},
+					"result_mode": map[string]interface{}{
+						"type":        "string",
+						"description": "Result shaping: full (default), compact (count+sample+schema), count_only, schema_only",
+						"enum":        []string{"full", "compact", "count_only", "schema_only"},
+					},
 				},
 				"required": []string{"command"},
 			},
@@ -520,10 +525,16 @@ func (s *Server) handleExecute(req JSONRPCRequest, params ToolCallParams) {
 		return
 	}
 
+	// Extract result_mode (default: "full").
+	resultMode, _ := params.Arguments["result_mode"].(string)
+	if resultMode == "" {
+		resultMode = "full"
+	}
+
 	// Build the tool name from the canonical command for buildArgs.
 	toolName := commandToToolName(contract.Command)
 	args := s.buildArgs(contract, toolName, cmdArgs)
-	s.executeAndRespond(req.ID, args)
+	s.executeWithCompaction(req.ID, args, resultMode)
 }
 
 // executeAndRespond runs a subprocess and writes the result.
@@ -542,6 +553,229 @@ func (s *Server) executeAndRespond(id interface{}, args []string) {
 	s.writeResult(id, ToolCallResult{
 		Content: []ToolContent{{Type: "text", Text: string(output)}},
 	})
+}
+
+// validResultModes are the accepted result_mode values.
+var validResultModes = map[string]bool{
+	"full": true, "compact": true, "count_only": true, "schema_only": true,
+}
+
+// executeWithCompaction runs a subprocess and optionally compacts the result.
+func (s *Server) executeWithCompaction(id interface{}, args []string, resultMode string) {
+	if !validResultModes[resultMode] {
+		s.writeError(id, -32602, "Invalid params",
+			fmt.Sprintf("invalid result_mode %q; valid: full, compact, count_only, schema_only", resultMode))
+		return
+	}
+
+	cmd := exec.Command(s.DcxBinary, args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		s.writeResult(id, ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: string(output)}},
+			IsError: true,
+		})
+		return
+	}
+
+	if resultMode == "full" {
+		s.writeResult(id, ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: string(output)}},
+		})
+		return
+	}
+
+	// Parse JSON for compaction.
+	var parsed interface{}
+	trimmed := strings.TrimSpace(string(output))
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	if dec.Decode(&parsed) != nil {
+		// Can't parse — return raw output.
+		s.writeResult(id, ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: string(output)}},
+		})
+		return
+	}
+
+	compacted := compactResult(parsed, resultMode)
+	data, _ := json.Marshal(compacted)
+	s.writeResult(id, ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	})
+}
+
+// compactResult reshapes a JSON result based on the mode.
+func compactResult(data interface{}, mode string) interface{} {
+	m, isMap := data.(map[string]interface{})
+
+	switch mode {
+	case "compact":
+		return compactMode(data, m, isMap)
+	case "count_only":
+		return countOnlyMode(data, m, isMap)
+	case "schema_only":
+		return schemaOnlyMode(data, m, isMap)
+	default:
+		return data
+	}
+}
+
+// compactMode returns count + sample (first 3) + field names for list envelopes,
+// or top-level keys for single objects.
+func compactMode(data interface{}, m map[string]interface{}, isMap bool) interface{} {
+	if !isMap {
+		return data
+	}
+
+	// List envelope: {items: [...], source: "..."}
+	if itemsRaw, ok := m["items"]; ok {
+		if items, ok := itemsRaw.([]interface{}); ok {
+			result := map[string]interface{}{
+				"count": len(items),
+			}
+
+			// Sample: first 3 items.
+			sampleSize := 3
+			if len(items) < sampleSize {
+				sampleSize = len(items)
+			}
+			if sampleSize > 0 {
+				result["sample"] = items[:sampleSize]
+			}
+
+			// Field names from first item.
+			if len(items) > 0 {
+				if first, ok := items[0].(map[string]interface{}); ok {
+					fields := make([]string, 0, len(first))
+					for k := range first {
+						fields = append(fields, k)
+					}
+					sort.Strings(fields)
+					result["fields"] = fields
+				}
+			}
+
+			// Preserve envelope metadata.
+			for k, v := range m {
+				if k == "items" {
+					continue
+				}
+				result[k] = v
+			}
+			return result
+		}
+	}
+
+	// Single object: return top-level keys.
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return map[string]interface{}{
+		"type": "object",
+		"keys": keys,
+	}
+}
+
+// countOnlyMode returns just the item count for list envelopes.
+func countOnlyMode(data interface{}, m map[string]interface{}, isMap bool) interface{} {
+	if !isMap {
+		return map[string]interface{}{"count": 1}
+	}
+	if itemsRaw, ok := m["items"]; ok {
+		if items, ok := itemsRaw.([]interface{}); ok {
+			result := map[string]interface{}{"count": len(items)}
+			// Preserve source and next_page_token.
+			if v, ok := m["source"]; ok {
+				result["source"] = v
+			}
+			if v, ok := m["next_page_token"]; ok {
+				result["next_page_token"] = v
+			}
+			return result
+		}
+	}
+	return map[string]interface{}{"count": 1}
+}
+
+// schemaOnlyMode returns field names and types from the first item.
+func schemaOnlyMode(data interface{}, m map[string]interface{}, isMap bool) interface{} {
+	if !isMap {
+		return map[string]interface{}{"type": fmt.Sprintf("%T", data)}
+	}
+
+	// List envelope: extract from first item.
+	if itemsRaw, ok := m["items"]; ok {
+		if items, ok := itemsRaw.([]interface{}); ok {
+			if len(items) > 0 {
+				if first, ok := items[0].(map[string]interface{}); ok {
+					fields := make([]map[string]string, 0, len(first))
+					keys := make([]string, 0, len(first))
+					for k := range first {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+					for _, k := range keys {
+						v := first[k]
+						fields = append(fields, map[string]string{
+							"name": k,
+							"type": jsonTypeOf(v),
+						})
+					}
+					return map[string]interface{}{
+						"item_count": len(items),
+						"fields":     fields,
+					}
+				}
+			}
+			return map[string]interface{}{
+				"item_count": 0,
+				"fields":     []interface{}{},
+			}
+		}
+	}
+
+	// Single object: return key→type map.
+	fields := make([]map[string]string, 0, len(m))
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fields = append(fields, map[string]string{
+			"name": k,
+			"type": jsonTypeOf(m[k]),
+		})
+	}
+	return map[string]interface{}{
+		"type":   "object",
+		"fields": fields,
+	}
+}
+
+func jsonTypeOf(v interface{}) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case json.Number:
+		return "number"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case nil:
+		return "null"
+	case map[string]interface{}:
+		return "object"
+	case []interface{}:
+		return "array"
+	default:
+		return "unknown"
+	}
 }
 
 // maxBatchSteps is the maximum number of steps in a batch.
