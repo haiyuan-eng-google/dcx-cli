@@ -449,7 +449,7 @@ func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bo
 		return false
 	}
 	data, dataOk := dataRaw.([]interface{})
-	if !dataOk || len(data) == 0 {
+	if !dataOk {
 		return false
 	}
 	schema, schemaOk := schemaRaw.(map[string]interface{})
@@ -464,9 +464,11 @@ func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bo
 	if !fieldsOk || len(fields) == 0 {
 		return false
 	}
-	// First row must be a map (flat row objects).
-	if _, ok := data[0].(map[string]interface{}); !ok {
-		return false
+	// Non-empty data must have map rows.
+	if len(data) > 0 {
+		if _, ok := data[0].(map[string]interface{}); !ok {
+			return false
+		}
 	}
 
 	// Extract column names from schema.fields.
@@ -481,6 +483,13 @@ func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bo
 			return false
 		}
 		headers = append(headers, Sanitize(name))
+	}
+
+	// Handle zero-row case.
+	if len(data) == 0 {
+		fmt.Fprintf(w, "%s(0 rows)\n", prefix)
+		renderCAMetadata(w, m, prefix)
+		return true
 	}
 
 	// Extract rows.
@@ -548,14 +557,26 @@ func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bo
 	}
 	fmt.Fprintf(w, "%s(%d rows)\n", prefix, len(rows))
 
-	// Also render other keys in the map (name, etc.) if present.
+	renderCAMetadata(w, m, prefix)
+	return true
+}
+
+// renderCAMetadata renders non-data/schema keys from a CA result map.
+func renderCAMetadata(w *os.File, m map[string]interface{}, prefix string) {
+	// Determine indent level from prefix.
+	indent := len(prefix) / 2
 	for k, v := range m {
 		if k == "data" || k == "schema" {
 			continue
 		}
-		fmt.Fprintf(w, "%s%s: %s\n", prefix, Sanitize(k), Sanitize(formatScalar(v)))
+		switch v.(type) {
+		case map[string]interface{}, []interface{}:
+			fmt.Fprintf(w, "%s%s:\n", prefix, Sanitize(k))
+			renderTextValue(w, v, indent+1)
+		default:
+			fmt.Fprintf(w, "%s%s: %s\n", prefix, Sanitize(k), Sanitize(formatScalar(v)))
+		}
 	}
-	return true
 }
 
 // renderBQQueryTable renders a BQ query result as a formatted table.
