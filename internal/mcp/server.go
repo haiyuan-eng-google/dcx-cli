@@ -329,7 +329,16 @@ func (s *Server) handleClassicToolCall(req JSONRPCRequest, params ToolCallParams
 
 // handleDiscover lists available commands, optionally filtered by domain.
 func (s *Server) handleDiscover(req JSONRPCRequest, params ToolCallParams) {
-	domainFilter, _ := params.Arguments["domain"].(string)
+	var domainFilter string
+	if domainRaw, ok := params.Arguments["domain"]; ok {
+		domainStr, isStr := domainRaw.(string)
+		if !isStr || domainRaw == nil {
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("\"domain\" must be a string, got %T", domainRaw))
+			return
+		}
+		domainFilter = domainStr
+	}
 
 	type cmdSummary struct {
 		Command     string `json:"command"`
@@ -427,12 +436,20 @@ func (s *Server) handleExecute(req JSONRPCRequest, params ToolCallParams) {
 		return
 	}
 
-	// Extract args from the "args" object.
+	// Extract args from the "args" object. Reject null/non-object.
 	cmdArgs := make(map[string]interface{})
 	if argsRaw, ok := params.Arguments["args"]; ok {
-		if argsMap, ok := argsRaw.(map[string]interface{}); ok {
-			cmdArgs = argsMap
+		if argsRaw == nil {
+			s.writeError(req.ID, -32602, "Invalid params", "\"args\" must be an object, got null")
+			return
 		}
+		argsMap, ok := argsRaw.(map[string]interface{})
+		if !ok {
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("\"args\" must be an object, got %T", argsRaw))
+			return
+		}
+		cmdArgs = argsMap
 	}
 
 	if err := s.validateRequiredPositionals(contract, cmdArgs); err != nil {
