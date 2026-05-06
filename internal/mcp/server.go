@@ -209,41 +209,13 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		return
 	}
 
-	// Build positional flag set from contract metadata.
-	positionalFlags := make(map[string]bool)
-	for _, f := range contract.Flags {
-		if f.Positional {
-			positionalFlags[f.Name] = true
-		}
+	// Validate required positional args before subprocess.
+	if err := s.validateRequiredPositionals(contract, params.Arguments); err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
 	}
 
-	// Convert tool name back to command args.
-	cmdArgs := toolNameToArgs(params.Name)
-
-	// Build subprocess args with deterministic ordering.
-	args := append(cmdArgs, "--format", s.Format)
-
-	// Sort argument keys for deterministic subprocess invocation.
-	keys := make([]string, 0, len(params.Arguments))
-	for k := range params.Arguments {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var positionalArgs []string
-	for _, k := range keys {
-		v := params.Arguments[k]
-		sv := fmt.Sprintf("%v", v)
-		if sv == "" {
-			continue
-		}
-		if positionalFlags[k] {
-			positionalArgs = append(positionalArgs, sv)
-		} else {
-			args = append(args, "--"+k, sv)
-		}
-	}
-	args = append(args, positionalArgs...)
+	args := s.buildArgs(contract, params.Name, params.Arguments)
 
 	// Execute subprocess.
 	cmd := exec.Command(s.DcxBinary, args...)
@@ -286,6 +258,67 @@ func (s *Server) writeError(id interface{}, code int, message, data string) {
 	}
 	respData, _ := json.Marshal(resp)
 	fmt.Fprintln(os.Stdout, string(respData))
+}
+
+// validateRequiredPositionals checks that required positional args are present.
+func (s *Server) validateRequiredPositionals(contract *contracts.CommandContract, args map[string]interface{}) error {
+	for _, f := range contract.Flags {
+		if f.Positional && f.Required {
+			if _, ok := args[f.Name]; !ok {
+				return fmt.Errorf("required positional argument %q is missing", f.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// buildArgs constructs deterministic subprocess args from a contract and arguments.
+// Non-positional flags are sorted by key. Positional args follow in contract order.
+func (s *Server) buildArgs(contract *contracts.CommandContract, toolName string, arguments map[string]interface{}) []string {
+	cmdArgs := toolNameToArgs(toolName)
+	args := append(cmdArgs, "--format", s.Format)
+
+	// Identify positional flags.
+	positionalFlags := make(map[string]bool)
+	for _, f := range contract.Flags {
+		if f.Positional {
+			positionalFlags[f.Name] = true
+		}
+	}
+
+	// Sorted non-positional flags.
+	var flagKeys []string
+	for k := range arguments {
+		if !positionalFlags[k] {
+			flagKeys = append(flagKeys, k)
+		}
+	}
+	sort.Strings(flagKeys)
+
+	for _, k := range flagKeys {
+		sv := fmt.Sprintf("%v", arguments[k])
+		if sv == "" {
+			continue
+		}
+		args = append(args, "--"+k, sv)
+	}
+
+	// Positional args in contract declaration order.
+	for _, f := range contract.Flags {
+		if !f.Positional {
+			continue
+		}
+		v, ok := arguments[f.Name]
+		if !ok {
+			continue
+		}
+		sv := fmt.Sprintf("%v", v)
+		if sv != "" {
+			args = append(args, sv)
+		}
+	}
+
+	return args
 }
 
 // commandToToolName converts "dcx datasets list" to "dcx_datasets_list".
