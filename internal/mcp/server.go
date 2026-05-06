@@ -307,6 +307,11 @@ func (s *Server) handleToolsListProgressive(req JSONRPCRequest) {
 									"type":        "object",
 									"description": "Arguments. Use $prev.path to reference previous step result.",
 								},
+								"result_mode": map[string]interface{}{
+									"type":        "string",
+									"description": "Result shaping per step: full (default), compact, count_only, schema_only",
+									"enum":        []string{"full", "compact", "count_only", "schema_only"},
+								},
 							},
 							"required": []string{"command"},
 						},
@@ -525,10 +530,22 @@ func (s *Server) handleExecute(req JSONRPCRequest, params ToolCallParams) {
 		return
 	}
 
-	// Extract result_mode (default: "full").
-	resultMode, _ := params.Arguments["result_mode"].(string)
-	if resultMode == "" {
-		resultMode = "full"
+	// Extract result_mode (default: "full"). Reject non-string.
+	resultMode := "full"
+	if rmRaw, ok := params.Arguments["result_mode"]; ok {
+		if rmRaw == nil {
+			s.writeError(req.ID, -32602, "Invalid params", "\"result_mode\" must be a string, got null")
+			return
+		}
+		rmStr, isStr := rmRaw.(string)
+		if !isStr {
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("\"result_mode\" must be a string, got %T", rmRaw))
+			return
+		}
+		if rmStr != "" {
+			resultMode = rmStr
+		}
 	}
 
 	// Build the tool name from the canonical command for buildArgs.
@@ -586,13 +603,21 @@ func (s *Server) executeWithCompaction(id interface{}, args []string, resultMode
 		return
 	}
 
-	// Parse JSON for compaction.
+	// Parse JSON for compaction. Enforce EOF to reject trailing content.
 	var parsed interface{}
 	trimmed := strings.TrimSpace(string(output))
 	dec := json.NewDecoder(strings.NewReader(trimmed))
 	dec.UseNumber()
 	if dec.Decode(&parsed) != nil {
 		// Can't parse — return raw output.
+		s.writeResult(id, ToolCallResult{
+			Content: []ToolContent{{Type: "text", Text: string(output)}},
+		})
+		return
+	}
+	var extra json.RawMessage
+	if dec.Decode(&extra) != io.EOF {
+		// Trailing content — not clean JSON, return raw.
 		s.writeResult(id, ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: string(output)}},
 		})
@@ -786,8 +811,9 @@ const maxBatchOutputBytes = 1024 * 1024 // 1 MB
 
 // batchStep is a single step in a batch request.
 type batchStep struct {
-	Command string                 `json:"command"`
-	Args    map[string]interface{} `json:"args"`
+	Command    string                 `json:"command"`
+	Args       map[string]interface{} `json:"args"`
+	ResultMode string                 `json:"result_mode"`
 }
 
 // batchStepResult is the result of a single batch step.
@@ -853,7 +879,24 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 			}
 			args = argsMap
 		}
-		steps = append(steps, batchStep{Command: command, Args: args})
+		rm := "full"
+		if rmRaw, ok := m["result_mode"]; ok && rmRaw != nil {
+			rmStr, isStr := rmRaw.(string)
+			if !isStr {
+				s.writeError(req.ID, -32602, "Invalid params",
+					fmt.Sprintf("step %d: \"result_mode\" must be a string, got %T", i, rmRaw))
+				return
+			}
+			if rmStr != "" && !validResultModes[rmStr] {
+				s.writeError(req.ID, -32602, "Invalid params",
+					fmt.Sprintf("step %d: invalid result_mode %q; valid: full, compact, count_only, schema_only", i, rmStr))
+				return
+			}
+			if rmStr != "" {
+				rm = rmStr
+			}
+		}
+		steps = append(steps, batchStep{Command: command, Args: args, ResultMode: rm})
 	}
 
 	// Validate all steps upfront (fail-fast before any execution).
@@ -963,12 +1006,22 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				}
 			}
 
+			// Apply result_mode compaction if JSON is available.
+			outputStr := string(output)
+			var resultJSON interface{} = parsed
+			if parsed != nil && step.ResultMode != "full" {
+				compacted := compactResult(parsed, step.ResultMode)
+				compactedData, _ := json.Marshal(compacted)
+				outputStr = string(compactedData)
+				resultJSON = compacted
+			}
+
 			result := batchStepResult{
 				Step:     i,
 				Command:  step.Command,
 				ExitCode: exitCode,
-				Output:   string(output),
-				JSON:     parsed,
+				Output:   outputStr,
+				JSON:     resultJSON,
 			}
 			if exitCode != 0 {
 				result.Error = fmt.Sprintf("command exited with code %d", exitCode)
