@@ -276,6 +276,10 @@ func renderTextValue(w *os.File, value interface{}, indent int) {
 
 	switch v := value.(type) {
 	case map[string]interface{}:
+		// Check for CA result shape: {data: [...], schema: {fields: [...]}}
+		if renderCAResultTable(w, v, prefix) {
+			return
+		}
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
@@ -434,6 +438,152 @@ func escapeCellValue(s string) string {
 	s = strings.ReplaceAll(s, "\r", "\\r")
 	s = strings.ReplaceAll(s, "\t", "\\t")
 	return s
+}
+
+// renderCAResultTable detects the CA result shape {data: [...], schema: {fields: [...]}}
+// and renders the data array as an inline table. Returns true if it handled the rendering.
+func renderCAResultTable(w *os.File, m map[string]interface{}, prefix string) bool {
+	dataRaw, hasData := m["data"]
+	schemaRaw, hasSchema := m["schema"]
+	if !hasData || !hasSchema {
+		return false
+	}
+	data, dataOk := dataRaw.([]interface{})
+	if !dataOk {
+		return false
+	}
+	schema, schemaOk := schemaRaw.(map[string]interface{})
+	if !schemaOk {
+		return false
+	}
+	fieldsRaw, hasFields := schema["fields"]
+	if !hasFields {
+		return false
+	}
+	fields, fieldsOk := fieldsRaw.([]interface{})
+	if !fieldsOk || len(fields) == 0 {
+		return false
+	}
+	// Non-empty data must have map rows.
+	if len(data) > 0 {
+		if _, ok := data[0].(map[string]interface{}); !ok {
+			return false
+		}
+	}
+
+	// Extract column names from schema.fields.
+	var headers []string
+	for _, f := range fields {
+		fm, ok := f.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		name, _ := fm["name"].(string)
+		if name == "" {
+			return false
+		}
+		headers = append(headers, Sanitize(name))
+	}
+
+	// Handle zero-row case.
+	if len(data) == 0 {
+		fmt.Fprintf(w, "%s(0 rows)\n", prefix)
+		renderCAMetadata(w, m, prefix)
+		return true
+	}
+
+	// Extract rows.
+	var rows [][]string
+	for _, item := range data {
+		row, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cells := make([]string, len(headers))
+		for i, h := range headers {
+			v, exists := row[h]
+			if !exists || v == nil {
+				cells[i] = "NULL"
+			} else {
+				cells[i] = escapeCellValue(Sanitize(fmt.Sprintf("%v", v)))
+			}
+		}
+		rows = append(rows, cells)
+	}
+
+	// Render as aligned text table.
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len(h)
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			if len(cell) > widths[i] {
+				widths[i] = len(cell)
+			}
+		}
+	}
+
+	// Print header.
+	var line strings.Builder
+	for i, h := range headers {
+		if i > 0 {
+			line.WriteString(" | ")
+		}
+		line.WriteString(fmt.Sprintf("%-*s", widths[i], h))
+	}
+	fmt.Fprintf(w, "%s%s\n", prefix, line.String())
+
+	// Separator.
+	line.Reset()
+	for i, wi := range widths {
+		if i > 0 {
+			line.WriteString("-+-")
+		}
+		line.WriteString(strings.Repeat("-", wi))
+	}
+	fmt.Fprintf(w, "%s%s\n", prefix, line.String())
+
+	// Rows.
+	for _, row := range rows {
+		line.Reset()
+		for i, cell := range row {
+			if i > 0 {
+				line.WriteString(" | ")
+			}
+			line.WriteString(fmt.Sprintf("%-*s", widths[i], cell))
+		}
+		fmt.Fprintf(w, "%s%s\n", prefix, line.String())
+	}
+	fmt.Fprintf(w, "%s(%d rows)\n", prefix, len(rows))
+
+	renderCAMetadata(w, m, prefix)
+	return true
+}
+
+// renderCAMetadata renders non-data/schema keys from a CA result map.
+func renderCAMetadata(w *os.File, m map[string]interface{}, prefix string) {
+	// Collect and sort keys for stable output.
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if k == "data" || k == "schema" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	indent := len(prefix) / 2
+	for _, k := range keys {
+		v := m[k]
+		switch v.(type) {
+		case map[string]interface{}, []interface{}:
+			fmt.Fprintf(w, "%s%s:\n", prefix, Sanitize(k))
+			renderTextValue(w, v, indent+1)
+		default:
+			fmt.Fprintf(w, "%s%s: %s\n", prefix, Sanitize(k), Sanitize(formatScalar(v)))
+		}
+	}
 }
 
 // renderBQQueryTable renders a BQ query result as a formatted table.

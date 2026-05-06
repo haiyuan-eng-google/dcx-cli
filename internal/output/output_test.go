@@ -283,3 +283,184 @@ func TestFormatNames(t *testing.T) {
 		t.Errorf("FormatNames() returned %d names, want 4", len(names))
 	}
 }
+
+func TestRenderCAResultTable_MultiRow(t *testing.T) {
+	value := map[string]interface{}{
+		"question": "top events",
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"event_type": "LLM_RESPONSE", "count": float64(54)},
+				map[string]interface{}{"event_type": "LLM_REQUEST", "count": float64(52)},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "event_type", "type": "STRING"},
+					map[string]interface{}{"name": "count", "type": "INTEGER"},
+				},
+			},
+			"name": "top_events",
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(out, "event_type") || !strings.Contains(out, "count") {
+		t.Errorf("missing table headers in: %s", out)
+	}
+	if !strings.Contains(out, "LLM_RESPONSE") || !strings.Contains(out, "54") {
+		t.Errorf("missing row data in: %s", out)
+	}
+	if !strings.Contains(out, "(2 rows)") {
+		t.Errorf("missing row count in: %s", out)
+	}
+	if !strings.Contains(out, "name: top_events") {
+		t.Errorf("missing metadata 'name' in: %s", out)
+	}
+}
+
+func TestRenderCAResultTable_SingleRow(t *testing.T) {
+	value := map[string]interface{}{
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"total": float64(318)},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "total", "type": "INTEGER"},
+				},
+			},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(out, "total") {
+		t.Errorf("missing header in: %s", out)
+	}
+	if !strings.Contains(out, "318") {
+		t.Errorf("missing value in: %s", out)
+	}
+	if !strings.Contains(out, "(1 rows)") {
+		t.Errorf("missing row count in: %s", out)
+	}
+}
+
+func TestRenderCAResultTable_ZeroRows(t *testing.T) {
+	value := map[string]interface{}{
+		"results": map[string]interface{}{
+			"data": []interface{}{},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "x", "type": "STRING"},
+				},
+			},
+			"name": "empty_result",
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(out, "(0 rows)") {
+		t.Errorf("missing (0 rows) in: %s", out)
+	}
+	if !strings.Contains(out, "name: empty_result") {
+		t.Errorf("missing metadata in: %s", out)
+	}
+}
+
+func TestRenderCAResultTable_NullAndMissingFields(t *testing.T) {
+	value := map[string]interface{}{
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"a": "hello", "b": nil},
+				map[string]interface{}{"a": "world"}, // "b" missing
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "a", "type": "STRING"},
+					map[string]interface{}{"name": "b", "type": "STRING"},
+				},
+			},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if strings.Count(out, "NULL") != 2 {
+		t.Errorf("expected 2 NULLs (nil + missing), got: %s", out)
+	}
+}
+
+func TestRenderCAResultTable_EscapesNewlines(t *testing.T) {
+	value := map[string]interface{}{
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"msg": "line1\nline2\ttab"},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "msg", "type": "STRING"},
+				},
+			},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if !strings.Contains(out, `line1\nline2\ttab`) {
+		t.Errorf("newline/tab not escaped in: %s", out)
+	}
+}
+
+func TestRenderCAResultTable_NestedMetadata(t *testing.T) {
+	value := map[string]interface{}{
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"x": float64(1)},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "x", "type": "INTEGER"},
+				},
+			},
+			"name": "test",
+			"metadata": map[string]interface{}{
+				"nested_key": "nested_value",
+			},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		if err := Render(Text, value); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Nested metadata should NOT show as map[...]
+	if strings.Contains(out, "map[") {
+		t.Errorf("nested metadata rendered as raw map: %s", out)
+	}
+	if !strings.Contains(out, "nested_key: nested_value") {
+		t.Errorf("missing nested metadata in: %s", out)
+	}
+}
