@@ -9,12 +9,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
+	"github.com/haiyuan-eng-google/dcx-cli/internal/jsonpath"
 )
 
 // AllowedMCPFormats are the formats allowed for MCP output.
@@ -276,6 +278,34 @@ func (s *Server) handleToolsListProgressive(req JSONRPCRequest) {
 				"required": []string{"command"},
 			},
 		},
+		{
+			Name:        "dcx_batch",
+			Description: "Execute multiple read-only dcx commands in sequence. Use $prev.path to reference the previous step's JSON result.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"steps": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"command": map[string]interface{}{
+									"type":        "string",
+									"description": "Command path, e.g. 'datasets list'",
+								},
+								"args": map[string]interface{}{
+									"type":        "object",
+									"description": "Arguments. Use $prev.path to reference previous step result.",
+								},
+							},
+							"required": []string{"command"},
+						},
+						"description": "Ordered list of commands (max 10)",
+					},
+				},
+				"required": []string{"steps"},
+			},
+		},
 	}
 
 	s.writeResult(req.ID, ToolsListResult{Tools: tools})
@@ -300,9 +330,12 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		case "dcx_execute":
 			s.handleExecute(req, params)
 			return
+		case "dcx_batch":
+			s.handleBatch(req, params)
+			return
 		}
 		s.writeError(req.ID, -32601, "Method not found",
-			fmt.Sprintf("unknown tool %q; available: dcx_discover, dcx_describe, dcx_execute", params.Name))
+			fmt.Sprintf("unknown tool %q; available: dcx_discover, dcx_describe, dcx_execute, dcx_batch", params.Name))
 		return
 	}
 
@@ -504,6 +537,248 @@ func (s *Server) executeAndRespond(id interface{}, args []string) {
 	s.writeResult(id, ToolCallResult{
 		Content: []ToolContent{{Type: "text", Text: string(output)}},
 	})
+}
+
+// maxBatchSteps is the maximum number of steps in a batch.
+const maxBatchSteps = 10
+
+// maxBatchOutputBytes is the maximum total output bytes across all steps.
+const maxBatchOutputBytes = 1024 * 1024 // 1 MB
+
+// batchStep is a single step in a batch request.
+type batchStep struct {
+	Command string                 `json:"command"`
+	Args    map[string]interface{} `json:"args"`
+}
+
+// batchStepResult is the result of a single batch step.
+type batchStepResult struct {
+	Step     int         `json:"step"`
+	Command  string      `json:"command"`
+	ExitCode int         `json:"exit_code"`
+	Output   string      `json:"output"`
+	JSON     interface{} `json:"json,omitempty"`
+	Error    string      `json:"error,omitempty"`
+}
+
+// handleBatch executes multiple commands in sequence with $prev references.
+func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
+	stepsRaw, ok := params.Arguments["steps"]
+	if !ok || stepsRaw == nil {
+		s.writeError(req.ID, -32602, "Invalid params", "required argument \"steps\" is missing")
+		return
+	}
+	stepsArr, ok := stepsRaw.([]interface{})
+	if !ok {
+		s.writeError(req.ID, -32602, "Invalid params",
+			fmt.Sprintf("\"steps\" must be an array, got %T", stepsRaw))
+		return
+	}
+	if len(stepsArr) == 0 {
+		s.writeError(req.ID, -32602, "Invalid params", "\"steps\" must not be empty")
+		return
+	}
+	if len(stepsArr) > maxBatchSteps {
+		s.writeError(req.ID, -32602, "Invalid params",
+			fmt.Sprintf("\"steps\" has %d entries, max is %d", len(stepsArr), maxBatchSteps))
+		return
+	}
+
+	// Parse steps.
+	var steps []batchStep
+	for i, raw := range stepsArr {
+		m, ok := raw.(map[string]interface{})
+		if !ok {
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("step %d must be an object", i))
+			return
+		}
+		command, _ := m["command"].(string)
+		if command == "" {
+			s.writeError(req.ID, -32602, "Invalid params",
+				fmt.Sprintf("step %d: required field \"command\" is missing", i))
+			return
+		}
+		args := make(map[string]interface{})
+		if argsRaw, ok := m["args"]; ok {
+			if argsRaw == nil {
+				s.writeError(req.ID, -32602, "Invalid params",
+					fmt.Sprintf("step %d: \"args\" must be an object, got null", i))
+				return
+			}
+			argsMap, ok := argsRaw.(map[string]interface{})
+			if !ok {
+				s.writeError(req.ID, -32602, "Invalid params",
+					fmt.Sprintf("step %d: \"args\" must be an object, got %T", i, argsRaw))
+				return
+			}
+			args = argsMap
+		}
+		steps = append(steps, batchStep{Command: command, Args: args})
+	}
+
+	// Validate all steps upfront (fail-fast before any execution).
+	for i, step := range steps {
+		if _, err := s.CanExecuteMCPCommand(step.Command); err != nil {
+			s.writeError(req.ID, -32601, "Method not allowed",
+				fmt.Sprintf("step %d (%s): %s", i, step.Command, err.Error()))
+			return
+		}
+	}
+
+	// Execute steps sequentially.
+	var results []batchStepResult
+	var prevJSON interface{}
+	totalBytes := 0
+
+	for i, step := range steps {
+		contract, _ := s.CanExecuteMCPCommand(step.Command)
+
+		// Resolve $prev references in args.
+		resolvedArgs := make(map[string]interface{})
+		for k, v := range step.Args {
+			sv, ok := v.(string)
+			if ok && strings.Contains(sv, "$prev") {
+				if prevJSON == nil {
+					msg := "$prev referenced but no previous result"
+					if i > 0 {
+						msg = "$prev referenced but previous step did not produce valid JSON"
+					}
+					results = append(results, batchStepResult{
+						Step:     i,
+						Command:  step.Command,
+						ExitCode: 1,
+						Error:    fmt.Sprintf("step %d: %s", i, msg),
+					})
+					goto done // fail-fast
+				}
+				resolved, err := resolvePrevRef(sv, prevJSON)
+				if err != nil {
+					results = append(results, batchStepResult{
+						Step:     i,
+						Command:  step.Command,
+						ExitCode: 1,
+						Error:    fmt.Sprintf("step %d: %s", i, err.Error()),
+					})
+					goto done
+				}
+				resolvedArgs[k] = resolved
+			} else {
+				resolvedArgs[k] = v
+			}
+		}
+
+		// Validate positionals.
+		if err := s.validateRequiredPositionals(contract, resolvedArgs); err != nil {
+			results = append(results, batchStepResult{
+				Step:     i,
+				Command:  step.Command,
+				ExitCode: 1,
+				Error:    fmt.Sprintf("step %d: %s", i, err.Error()),
+			})
+			goto done
+		}
+
+		// Build and execute.
+		{
+			toolName := commandToToolName(contract.Command)
+			args := s.buildArgs(contract, toolName, resolvedArgs)
+
+			cmd := exec.Command(s.DcxBinary, args...)
+			output, err := cmd.CombinedOutput()
+
+			exitCode := 0
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					exitCode = exitErr.ExitCode()
+				} else {
+					exitCode = 1
+				}
+			}
+
+			totalBytes += len(output)
+			if totalBytes > maxBatchOutputBytes {
+				results = append(results, batchStepResult{
+					Step:     i,
+					Command:  step.Command,
+					ExitCode: 1,
+					Error:    fmt.Sprintf("step %d: total output exceeds %d bytes limit", i, maxBatchOutputBytes),
+				})
+				goto done
+			}
+
+			// Parse JSON for $prev. Enforce EOF to reject trailing
+			// content (matches $last EOF enforcement in REPL).
+			var parsed interface{}
+			trimmed := strings.TrimSpace(string(output))
+			if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+				dec := json.NewDecoder(strings.NewReader(trimmed))
+				dec.UseNumber()
+				if dec.Decode(&parsed) == nil {
+					var extra json.RawMessage
+					if dec.Decode(&extra) != io.EOF {
+						parsed = nil // trailing content — not clean JSON
+					}
+				} else {
+					parsed = nil
+				}
+			}
+
+			result := batchStepResult{
+				Step:     i,
+				Command:  step.Command,
+				ExitCode: exitCode,
+				Output:   string(output),
+				JSON:     parsed,
+			}
+			if exitCode != 0 {
+				result.Error = fmt.Sprintf("command exited with code %d", exitCode)
+			}
+			results = append(results, result)
+
+			// Fail-fast on error.
+			if exitCode != 0 {
+				goto done
+			}
+
+			// Update $prev for next step. Always update so $prev
+			// reflects the immediate previous step, not a stale earlier one.
+			// If the step produced no JSON, $prev becomes nil and later
+			// $prev references will fail with "did not produce JSON".
+			prevJSON = parsed
+		}
+	}
+
+done:
+	data, _ := json.Marshal(results)
+	s.writeResult(req.ID, ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	})
+}
+
+// resolvePrevRef expands $prev references in a string value.
+func resolvePrevRef(value string, prevJSON interface{}) (string, error) {
+	idx := strings.Index(value, "$prev")
+	if idx < 0 {
+		return value, nil
+	}
+
+	prefix := value[:idx]
+	path := value[idx+5:] // after "$prev"
+	suffix := ""
+
+	// If path is empty, return the whole prev as JSON.
+	if path == "" || (path[0] != '.' && path[0] != '[') {
+		suffix = path
+		resolved := jsonpath.FormatValue(prevJSON)
+		return prefix + resolved + suffix, nil
+	}
+
+	resolved, err := jsonpath.Resolve(prevJSON, path)
+	if err != nil {
+		return "", fmt.Errorf("$prev%s: %w", path, err)
+	}
+	return prefix + resolved, nil
 }
 
 func (s *Server) writeResult(id interface{}, result interface{}) {
