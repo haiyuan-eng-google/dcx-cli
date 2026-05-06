@@ -134,6 +134,10 @@ func (s *Server) handleRequest(req JSONRPCRequest) {
 		s.handleToolsList(req)
 	case "tools/call":
 		s.handleToolsCall(req)
+	case "resources/list":
+		s.handleResourcesList(req)
+	case "resources/read":
+		s.handleResourcesRead(req)
 	case "notifications/initialized":
 		// Client acknowledgement — no response needed.
 	default:
@@ -145,7 +149,8 @@ func (s *Server) handleInitialize(req JSONRPCRequest) {
 	result := map[string]interface{}{
 		"protocolVersion": "2024-11-05",
 		"capabilities": map[string]interface{}{
-			"tools": map[string]interface{}{},
+			"tools":     map[string]interface{}{},
+			"resources": map[string]interface{}{},
 		},
 		"serverInfo": map[string]interface{}{
 			"name":    "dcx",
@@ -779,6 +784,255 @@ func resolvePrevRef(value string, prevJSON interface{}) (string, error) {
 		return "", fmt.Errorf("$prev%s: %w", path, err)
 	}
 	return prefix + resolved, nil
+}
+
+// MCPResource describes a resource in the MCP resources/list response.
+type MCPResource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType"`
+}
+
+// ResourcesListResult is the result of resources/list.
+type ResourcesListResult struct {
+	Resources []MCPResource `json:"resources"`
+}
+
+// ResourceReadParams are the params for resources/read.
+type ResourceReadParams struct {
+	URI string `json:"uri"`
+}
+
+// ResourceReadResult is the result of resources/read.
+type ResourceReadResult struct {
+	Contents []ResourceContent `json:"contents"`
+}
+
+// ResourceContent is a content block in a resource read result.
+type ResourceContent struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text"`
+}
+
+// handleResourcesList returns all available dcx resources.
+func (s *Server) handleResourcesList(req JSONRPCRequest) {
+	var resources []MCPResource
+
+	// Index resource: summary of all domains.
+	resources = append(resources, MCPResource{
+		URI:         "dcx://index",
+		Name:        "dcx command index",
+		Description: "Summary of all available Data Cloud domains and command counts",
+		MimeType:    "application/json",
+	})
+
+	// Collect domains and commands.
+	domainCmds := make(map[string][]string)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
+			continue
+		}
+		cmd := strings.TrimPrefix(c.Command, "dcx ")
+		domainCmds[c.Domain] = append(domainCmds[c.Domain], cmd)
+	}
+
+	// Domain resources.
+	domainNames := make([]string, 0, len(domainCmds))
+	for d := range domainCmds {
+		domainNames = append(domainNames, d)
+	}
+	sort.Strings(domainNames)
+
+	for _, domain := range domainNames {
+		resources = append(resources, MCPResource{
+			URI:         "dcx://domains/" + domain,
+			Name:        domain + " commands",
+			Description: fmt.Sprintf("%d read-only %s commands", len(domainCmds[domain]), domain),
+			MimeType:    "application/json",
+		})
+
+		// Per-command resources.
+		cmds := domainCmds[domain]
+		sort.Strings(cmds)
+		for _, cmd := range cmds {
+			safeName := strings.ReplaceAll(cmd, " ", "/")
+			resources = append(resources, MCPResource{
+				URI:      "dcx://commands/" + safeName,
+				Name:     cmd,
+				MimeType: "application/json",
+			})
+		}
+	}
+
+	s.writeResult(req.ID, ResourcesListResult{Resources: resources})
+}
+
+// handleResourcesRead returns the content of a specific resource.
+func (s *Server) handleResourcesRead(req JSONRPCRequest) {
+	var params ResourceReadParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
+	}
+
+	uri := params.URI
+	if uri == "" {
+		s.writeError(req.ID, -32602, "Invalid params", "required field \"uri\" is missing")
+		return
+	}
+
+	// Route by URI pattern.
+	switch {
+	case uri == "dcx://index":
+		s.readIndexResource(req, uri)
+	case strings.HasPrefix(uri, "dcx://domains/"):
+		domain := strings.TrimPrefix(uri, "dcx://domains/")
+		s.readDomainResource(req, uri, domain)
+	case strings.HasPrefix(uri, "dcx://commands/"):
+		cmdPath := strings.TrimPrefix(uri, "dcx://commands/")
+		s.readCommandResource(req, uri, cmdPath)
+	default:
+		s.writeError(req.ID, -32602, "Invalid params",
+			fmt.Sprintf("unknown resource URI: %s", uri))
+	}
+}
+
+func (s *Server) readIndexResource(req JSONRPCRequest, uri string) {
+	type domainSummary struct {
+		Domain   string `json:"domain"`
+		Commands int    `json:"commands"`
+		URI      string `json:"uri"`
+	}
+
+	domainCounts := make(map[string]int)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
+			continue
+		}
+		domainCounts[c.Domain]++
+	}
+
+	var summaries []domainSummary
+	for d, count := range domainCounts {
+		summaries = append(summaries, domainSummary{
+			Domain:   d,
+			Commands: count,
+			URI:      "dcx://domains/" + d,
+		})
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].Domain < summaries[j].Domain
+	})
+
+	total := 0
+	for _, s := range summaries {
+		total += s.Commands
+	}
+
+	result := map[string]interface{}{
+		"total_commands": total,
+		"domains":        summaries,
+	}
+
+	data, _ := json.Marshal(result)
+	s.writeResult(req.ID, ResourceReadResult{
+		Contents: []ResourceContent{{URI: uri, MimeType: "application/json", Text: string(data)}},
+	})
+}
+
+func (s *Server) readDomainResource(req JSONRPCRequest, uri, domain string) {
+	type cmdInfo struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+		URI         string `json:"uri"`
+	}
+
+	var commands []cmdInfo
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
+			continue
+		}
+		if c.Domain != domain {
+			continue
+		}
+		cmd := strings.TrimPrefix(c.Command, "dcx ")
+		safeName := strings.ReplaceAll(cmd, " ", "/")
+		commands = append(commands, cmdInfo{
+			Command:     cmd,
+			Description: c.Description,
+			URI:         "dcx://commands/" + safeName,
+		})
+	}
+
+	if len(commands) == 0 {
+		var available []string
+		seen := make(map[string]bool)
+		for _, c := range s.Registry.All() {
+			if _, err := s.CanExecuteMCPCommand(c.Command); err == nil && !seen[c.Domain] {
+				available = append(available, c.Domain)
+				seen[c.Domain] = true
+			}
+		}
+		sort.Strings(available)
+		s.writeError(req.ID, -32602, "Invalid params",
+			fmt.Sprintf("unknown domain %q; available: %s", domain, strings.Join(available, ", ")))
+		return
+	}
+
+	data, _ := json.Marshal(commands)
+	s.writeResult(req.ID, ResourceReadResult{
+		Contents: []ResourceContent{{URI: uri, MimeType: "application/json", Text: string(data)}},
+	})
+}
+
+func (s *Server) readCommandResource(req JSONRPCRequest, uri, cmdPath string) {
+	// Convert path back to command: "datasets/list" → "datasets list"
+	command := strings.ReplaceAll(cmdPath, "/", " ")
+
+	contract, err := s.CanExecuteMCPCommand(command)
+	if err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
+	}
+
+	// Build rich schema.
+	type flagDesc struct {
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Description string `json:"description"`
+		Required    bool   `json:"required,omitempty"`
+		Positional  bool   `json:"positional,omitempty"`
+	}
+
+	var flags []flagDesc
+	for _, f := range contract.Flags {
+		if f.Name == "format" || f.Name == "token" || f.Name == "credentials-file" {
+			continue
+		}
+		flags = append(flags, flagDesc{
+			Name:        f.Name,
+			Type:        f.Type,
+			Description: f.Description,
+			Required:    f.Required,
+			Positional:  f.Positional,
+		})
+	}
+
+	result := map[string]interface{}{
+		"command":     strings.TrimPrefix(contract.Command, "dcx "),
+		"domain":      contract.Domain,
+		"description": contract.Description,
+		"flags":       flags,
+		"is_mutation": contract.IsMutation,
+		"dry_run":     contract.SupportsDryRun,
+	}
+
+	data, _ := json.Marshal(result)
+	s.writeResult(req.ID, ResourceReadResult{
+		Contents: []ResourceContent{{URI: uri, MimeType: "application/json", Text: string(data)}},
+	})
 }
 
 func (s *Server) writeResult(id interface{}, result interface{}) {

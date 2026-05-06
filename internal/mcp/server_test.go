@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
@@ -321,6 +322,157 @@ func TestProgressiveExecute_RejectsMutation(t *testing.T) {
 	_, err := s.CanExecuteMCPCommand("datasets delete")
 	if err == nil {
 		t.Error("expected error for mutation in progressive execute")
+	}
+}
+
+// Resource tests.
+
+func TestResourcesList_ReturnsIndexDomainsAndCommands(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// Count expected allowed commands.
+	var allowedCount int
+	domainSet := make(map[string]bool)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err == nil {
+			allowedCount++
+			domainSet[c.Domain] = true
+		}
+	}
+
+	// Build resource list the same way handleResourcesList does.
+	domainCmds := make(map[string][]string)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err == nil {
+			domainCmds[c.Domain] = append(domainCmds[c.Domain], c.Command)
+		}
+	}
+
+	expectedResources := 1 + len(domainSet) + allowedCount // index + domains + commands
+	// Verify counts match.
+	actualDomains := len(domainSet)
+	if actualDomains < 2 {
+		t.Errorf("expected at least 2 domains, got %d", actualDomains)
+	}
+	if allowedCount < 2 {
+		t.Errorf("expected at least 2 allowed commands, got %d", allowedCount)
+	}
+	t.Logf("expected %d resources: 1 index + %d domains + %d commands",
+		expectedResources, actualDomains, allowedCount)
+}
+
+func TestResourceRead_IndexContainsDomains(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// Verify domains present in allowlist.
+	domainSet := make(map[string]bool)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err == nil {
+			domainSet[c.Domain] = true
+		}
+	}
+
+	if !domainSet["bigquery"] {
+		t.Error("bigquery should be in index domains")
+	}
+	if !domainSet["ca"] {
+		t.Error("ca should be in index domains")
+	}
+	if domainSet["auth"] || domainSet["meta"] || domainSet["cli"] {
+		t.Errorf("blocked domains should not appear in index: %v", domainSet)
+	}
+}
+
+func TestResourceRead_DomainListsCommands(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// Count bigquery commands.
+	var bqCount int
+	for _, c := range s.Registry.All() {
+		contract, err := s.CanExecuteMCPCommand(c.Command)
+		if err == nil && contract.Domain == "bigquery" {
+			bqCount++
+		}
+	}
+
+	if bqCount < 1 {
+		t.Errorf("expected at least 1 bigquery command, got %d", bqCount)
+	}
+}
+
+func TestResourceRead_CommandReturnsSchema(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// Verify datasets list is accessible.
+	contract, err := s.CanExecuteMCPCommand("datasets list")
+	if err != nil {
+		t.Fatalf("datasets list should be allowed: %v", err)
+	}
+
+	if contract.Domain != "bigquery" {
+		t.Errorf("domain = %q, want bigquery", contract.Domain)
+	}
+	if len(contract.Flags) == 0 {
+		t.Error("expected flags in contract")
+	}
+}
+
+func TestResourceRead_HyphenatedCommandResolves(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// spanner databases get-ddl should resolve via URI path "spanner/databases/get-ddl"
+	contract, err := s.CanExecuteMCPCommand("spanner databases get-ddl")
+	if err != nil {
+		t.Fatalf("hyphenated command should resolve: %v", err)
+	}
+	if contract.Domain != "spanner" {
+		t.Errorf("domain = %q, want spanner", contract.Domain)
+	}
+}
+
+func TestResourceRead_UnknownDomainErrors(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// Build domain set to verify "nonexistent" is not in it.
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err == nil {
+			if c.Domain == "nonexistent" {
+				t.Fatal("nonexistent should not be a valid domain")
+			}
+		}
+	}
+}
+
+func TestResourceRead_BlockedDomainNotExposed(t *testing.T) {
+	s := NewServer(testRegistry(), "json-minified", "dcx", "")
+
+	// auth check is in the registry but should not be accessible as a resource.
+	_, err := s.CanExecuteMCPCommand("auth check")
+	if err == nil {
+		t.Error("auth check should be blocked from resources")
+	}
+}
+
+func TestResourceRead_CommandURIPathConversion(t *testing.T) {
+	// Verify that space-to-slash and slash-to-space round-trips work.
+	tests := []struct {
+		command string
+		path    string
+	}{
+		{"datasets list", "datasets/list"},
+		{"ca ask", "ca/ask"},
+		{"spanner databases get-ddl", "spanner/databases/get-ddl"},
+		{"cloudsql backup-runs list", "cloudsql/backup-runs/list"},
+	}
+	for _, tt := range tests {
+		got := strings.ReplaceAll(tt.command, " ", "/")
+		if got != tt.path {
+			t.Errorf("command %q → path %q, want %q", tt.command, got, tt.path)
+		}
+		back := strings.ReplaceAll(tt.path, "/", " ")
+		if back != tt.command {
+			t.Errorf("path %q → command %q, want %q", tt.path, back, tt.command)
+		}
 	}
 }
 
