@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
@@ -144,24 +145,47 @@ func (s *Server) handleInitialize(req JSONRPCRequest) {
 	s.writeResult(req.ID, result)
 }
 
+// blockedDomains are domains excluded from MCP — not useful as agent tools.
+var blockedDomains = map[string]bool{
+	"meta": true, "auth": true, "profiles": true, "mcp": true, "cli": true,
+}
+
+// CanExecuteMCPCommand validates that a command is allowed via MCP.
+// Returns the canonical contract or an error. Used by tools/list, tools/call,
+// and future progressive/batch modes.
+func (s *Server) CanExecuteMCPCommand(command string) (*contracts.CommandContract, error) {
+	// Normalize: tokenize first (splits on all whitespace including tabs),
+	// strip leading "dcx" token if present, rejoin with single spaces.
+	tokens := strings.Fields(command)
+	if len(tokens) > 0 && tokens[0] == "dcx" {
+		tokens = tokens[1:]
+	}
+	cmd := "dcx " + strings.Join(tokens, " ")
+
+	contract, ok := s.Registry.Get(cmd)
+	if !ok {
+		return nil, fmt.Errorf("unknown command: %s", command)
+	}
+	if blockedDomains[contract.Domain] {
+		return nil, fmt.Errorf("command not available via MCP: %s", command)
+	}
+	if contract.IsMutation {
+		return nil, fmt.Errorf("MCP bridge is read-only; mutation commands are not available")
+	}
+	if strings.HasSuffix(contract.Command, " wait") {
+		return nil, fmt.Errorf("long-polling commands are not available via MCP")
+	}
+	return contract, nil
+}
+
 func (s *Server) handleToolsList(req JSONRPCRequest) {
 	all := s.Registry.All()
 	var tools []MCPTool
 
 	for _, c := range all {
-		// Skip non-data commands — not useful as MCP tools.
-		if c.Domain == "meta" || c.Domain == "auth" || c.Domain == "profiles" || c.Domain == "mcp" {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
 			continue
 		}
-		// Only expose read-only, non-blocking commands.
-		if c.IsMutation {
-			continue
-		}
-		// Exclude long-polling commands (not suitable for tool calls).
-		if strings.HasSuffix(c.Command, " wait") {
-			continue
-		}
-
 		tool := MCPTool{
 			Name:        commandToToolName(c.Command),
 			Description: c.Description,
@@ -180,36 +204,21 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		return
 	}
 
-	// Block mutations and long-polling commands.
+	// Resolve and validate the command via shared helper.
 	cmdName := toolNameToCommand(params.Name)
-	if contract, ok := s.Registry.Get(cmdName); ok && contract.IsMutation {
-		s.writeError(req.ID, -32601, "Method not allowed", "MCP bridge is read-only; mutation commands are not available")
-		return
-	}
-	if strings.HasSuffix(cmdName, " wait") {
-		s.writeError(req.ID, -32601, "Method not allowed", "Long-polling commands are not available via MCP")
+	contract, err := s.CanExecuteMCPCommand(cmdName)
+	if err != nil {
+		s.writeError(req.ID, -32601, "Method not allowed", err.Error())
 		return
 	}
 
-	// Convert tool name back to command args.
-	cmdArgs := toolNameToArgs(params.Name)
-
-	// Build subprocess args, stringifying non-string values.
-	// "question" is a positional arg for ca ask — append it without a flag prefix.
-	args := append(cmdArgs, "--format", s.Format)
-	var positionalArgs []string
-	for k, v := range params.Arguments {
-		sv := fmt.Sprintf("%v", v)
-		if sv == "" {
-			continue
-		}
-		if k == "question" {
-			positionalArgs = append(positionalArgs, sv)
-		} else {
-			args = append(args, "--"+k, sv)
-		}
+	// Validate required positional args before subprocess.
+	if err := s.validateRequiredPositionals(contract, params.Arguments); err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
 	}
-	args = append(args, positionalArgs...)
+
+	args := s.buildArgs(contract, params.Name, params.Arguments)
 
 	// Execute subprocess.
 	cmd := exec.Command(s.DcxBinary, args...)
@@ -252,6 +261,72 @@ func (s *Server) writeError(id interface{}, code int, message, data string) {
 	}
 	respData, _ := json.Marshal(resp)
 	fmt.Fprintln(os.Stdout, string(respData))
+}
+
+// validateRequiredPositionals checks that required positional args are present
+// and non-empty (rejects nil, "", and whitespace-only values).
+func (s *Server) validateRequiredPositionals(contract *contracts.CommandContract, args map[string]interface{}) error {
+	for _, f := range contract.Flags {
+		if f.Positional && f.Required {
+			v, ok := args[f.Name]
+			if !ok || v == nil {
+				return fmt.Errorf("required positional argument %q is missing", f.Name)
+			}
+			if sv := strings.TrimSpace(fmt.Sprintf("%v", v)); sv == "" {
+				return fmt.Errorf("required positional argument %q is empty", f.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// buildArgs constructs deterministic subprocess args from a contract and arguments.
+// Non-positional flags are sorted by key. Positional args follow in contract order.
+func (s *Server) buildArgs(contract *contracts.CommandContract, toolName string, arguments map[string]interface{}) []string {
+	cmdArgs := toolNameToArgs(toolName)
+	args := append(cmdArgs, "--format", s.Format)
+
+	// Identify positional flags.
+	positionalFlags := make(map[string]bool)
+	for _, f := range contract.Flags {
+		if f.Positional {
+			positionalFlags[f.Name] = true
+		}
+	}
+
+	// Sorted non-positional flags.
+	var flagKeys []string
+	for k := range arguments {
+		if !positionalFlags[k] {
+			flagKeys = append(flagKeys, k)
+		}
+	}
+	sort.Strings(flagKeys)
+
+	for _, k := range flagKeys {
+		sv := fmt.Sprintf("%v", arguments[k])
+		if sv == "" {
+			continue
+		}
+		args = append(args, "--"+k, sv)
+	}
+
+	// Positional args in contract declaration order.
+	for _, f := range contract.Flags {
+		if !f.Positional {
+			continue
+		}
+		v, ok := arguments[f.Name]
+		if !ok {
+			continue
+		}
+		sv := fmt.Sprintf("%v", v)
+		if sv != "" {
+			args = append(args, sv)
+		}
+	}
+
+	return args
 }
 
 // commandToToolName converts "dcx datasets list" to "dcx_datasets_list".
