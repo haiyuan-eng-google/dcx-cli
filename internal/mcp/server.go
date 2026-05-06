@@ -1006,14 +1006,17 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				}
 			}
 
-			// Apply result_mode compaction if JSON is available.
+			// Apply result_mode compaction for the response envelope.
+			// Keep raw parsed JSON for $prev resolution so chained steps
+			// can access the full data (e.g., $prev.items[4] after a
+			// compact step that only sampled 3 items).
 			outputStr := string(output)
-			var resultJSON interface{} = parsed
+			var envelopeJSON interface{} = parsed
 			if parsed != nil && step.ResultMode != "full" {
 				compacted := compactResult(parsed, step.ResultMode)
 				compactedData, _ := json.Marshal(compacted)
 				outputStr = string(compactedData)
-				resultJSON = compacted
+				envelopeJSON = compacted
 			}
 
 			result := batchStepResult{
@@ -1021,7 +1024,7 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				Command:  step.Command,
 				ExitCode: exitCode,
 				Output:   outputStr,
-				JSON:     resultJSON,
+				JSON:     envelopeJSON,
 			}
 			if exitCode != 0 {
 				result.Error = fmt.Sprintf("command exited with code %d", exitCode)
@@ -1033,10 +1036,8 @@ func (s *Server) handleBatch(req JSONRPCRequest, params ToolCallParams) {
 				goto done
 			}
 
-			// Update $prev for next step. Always update so $prev
-			// reflects the immediate previous step, not a stale earlier one.
-			// If the step produced no JSON, $prev becomes nil and later
-			// $prev references will fail with "did not produce JSON".
+			// Update $prev with RAW parsed JSON (not compacted) so
+			// the next step can resolve full paths like $prev.items[4].
 			prevJSON = parsed
 		}
 	}
