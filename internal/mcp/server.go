@@ -73,22 +73,30 @@ type ToolContent struct {
 	Text string `json:"text"`
 }
 
+// AllowedMCPModes are the valid server modes.
+var AllowedMCPModes = []string{"classic", "progressive"}
+
 // Server holds the MCP server state.
 type Server struct {
 	Registry  *contracts.Registry
 	Format    string // output format for tool calls
 	DcxBinary string // path to dcx binary for subprocess calls
+	Mode      string // "classic" (all tools) or "progressive" (3 meta-tools)
 }
 
 // NewServer creates an MCP server.
-func NewServer(registry *contracts.Registry, format, dcxBinary string) *Server {
+func NewServer(registry *contracts.Registry, format, dcxBinary, mode string) *Server {
 	if format == "" {
 		format = "json-minified"
+	}
+	if mode == "" {
+		mode = "classic"
 	}
 	return &Server{
 		Registry:  registry,
 		Format:    format,
 		DcxBinary: dcxBinary,
+		Mode:      mode,
 	}
 }
 
@@ -179,6 +187,14 @@ func (s *Server) CanExecuteMCPCommand(command string) (*contracts.CommandContrac
 }
 
 func (s *Server) handleToolsList(req JSONRPCRequest) {
+	if s.Mode == "progressive" {
+		s.handleToolsListProgressive(req)
+		return
+	}
+	s.handleToolsListClassic(req)
+}
+
+func (s *Server) handleToolsListClassic(req JSONRPCRequest) {
 	all := s.Registry.All()
 	var tools []MCPTool
 
@@ -197,6 +213,74 @@ func (s *Server) handleToolsList(req JSONRPCRequest) {
 	s.writeResult(req.ID, ToolsListResult{Tools: tools})
 }
 
+func (s *Server) handleToolsListProgressive(req JSONRPCRequest) {
+	// Collect available domains for the enum.
+	domainSet := make(map[string]bool)
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err == nil {
+			domainSet[c.Domain] = true
+		}
+	}
+	domains := make([]interface{}, 0, len(domainSet))
+	for d := range domainSet {
+		domains = append(domains, d)
+	}
+	sort.Slice(domains, func(i, j int) bool {
+		return domains[i].(string) < domains[j].(string)
+	})
+
+	tools := []MCPTool{
+		{
+			Name:        "dcx_discover",
+			Description: "List available Data Cloud commands. Optionally filter by domain.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"domain": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by domain (omit for all)",
+						"enum":        domains,
+					},
+				},
+			},
+		},
+		{
+			Name:        "dcx_describe",
+			Description: "Get the full input schema and flags for a specific dcx command.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"command": map[string]interface{}{
+						"type":        "string",
+						"description": "Command path, e.g. 'datasets list' or 'ca ask'",
+					},
+				},
+				"required": []string{"command"},
+			},
+		},
+		{
+			Name:        "dcx_execute",
+			Description: "Execute a read-only dcx command and return the result.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"command": map[string]interface{}{
+						"type":        "string",
+						"description": "Command path, e.g. 'datasets list' or 'ca ask'",
+					},
+					"args": map[string]interface{}{
+						"type":        "object",
+						"description": "Command arguments as key-value pairs",
+					},
+				},
+				"required": []string{"command"},
+			},
+		},
+	}
+
+	s.writeResult(req.ID, ToolsListResult{Tools: tools})
+}
+
 func (s *Server) handleToolsCall(req JSONRPCRequest) {
 	var params ToolCallParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -204,7 +288,29 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		return
 	}
 
-	// Resolve and validate the command via shared helper.
+	// Progressive mode meta-tools.
+	if s.Mode == "progressive" {
+		switch params.Name {
+		case "dcx_discover":
+			s.handleDiscover(req, params)
+			return
+		case "dcx_describe":
+			s.handleDescribe(req, params)
+			return
+		case "dcx_execute":
+			s.handleExecute(req, params)
+			return
+		}
+		s.writeError(req.ID, -32601, "Method not found",
+			fmt.Sprintf("unknown tool %q; available: dcx_discover, dcx_describe, dcx_execute", params.Name))
+		return
+	}
+
+	// Classic mode: resolve tool name to command.
+	s.handleClassicToolCall(req, params)
+}
+
+func (s *Server) handleClassicToolCall(req JSONRPCRequest, params ToolCallParams) {
 	cmdName := toolNameToCommand(params.Name)
 	contract, err := s.CanExecuteMCPCommand(cmdName)
 	if err != nil {
@@ -212,31 +318,150 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) {
 		return
 	}
 
-	// Validate required positional args before subprocess.
 	if err := s.validateRequiredPositionals(contract, params.Arguments); err != nil {
 		s.writeError(req.ID, -32602, "Invalid params", err.Error())
 		return
 	}
 
 	args := s.buildArgs(contract, params.Name, params.Arguments)
+	s.executeAndRespond(req.ID, args)
+}
 
-	// Execute subprocess.
+// handleDiscover lists available commands, optionally filtered by domain.
+func (s *Server) handleDiscover(req JSONRPCRequest, params ToolCallParams) {
+	domainFilter, _ := params.Arguments["domain"].(string)
+
+	type cmdSummary struct {
+		Command     string `json:"command"`
+		Domain      string `json:"domain"`
+		Description string `json:"description"`
+	}
+
+	var commands []cmdSummary
+	for _, c := range s.Registry.All() {
+		if _, err := s.CanExecuteMCPCommand(c.Command); err != nil {
+			continue
+		}
+		if domainFilter != "" && c.Domain != domainFilter {
+			continue
+		}
+		// Strip "dcx " prefix for cleaner output.
+		cmd := strings.TrimPrefix(c.Command, "dcx ")
+		commands = append(commands, cmdSummary{
+			Command:     cmd,
+			Domain:      c.Domain,
+			Description: c.Description,
+		})
+	}
+
+	data, _ := json.Marshal(commands)
+	s.writeResult(req.ID, ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	})
+}
+
+// handleDescribe returns the full schema for a specific command.
+func (s *Server) handleDescribe(req JSONRPCRequest, params ToolCallParams) {
+	command, _ := params.Arguments["command"].(string)
+	if command == "" {
+		s.writeError(req.ID, -32602, "Invalid params", "required argument \"command\" is missing")
+		return
+	}
+
+	contract, err := s.CanExecuteMCPCommand(command)
+	if err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
+	}
+
+	// Build a rich description with flags and metadata.
+	type flagDesc struct {
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Description string `json:"description"`
+		Required    bool   `json:"required,omitempty"`
+		Positional  bool   `json:"positional,omitempty"`
+	}
+
+	var flags []flagDesc
+	for _, f := range contract.Flags {
+		// Skip global flags set via env/config.
+		if f.Name == "format" || f.Name == "token" || f.Name == "credentials-file" {
+			continue
+		}
+		flags = append(flags, flagDesc{
+			Name:        f.Name,
+			Type:        f.Type,
+			Description: f.Description,
+			Required:    f.Required,
+			Positional:  f.Positional,
+		})
+	}
+
+	result := map[string]interface{}{
+		"command":     strings.TrimPrefix(contract.Command, "dcx "),
+		"domain":      contract.Domain,
+		"description": contract.Description,
+		"flags":       flags,
+		"is_mutation": contract.IsMutation,
+		"dry_run":     contract.SupportsDryRun,
+	}
+
+	data, _ := json.Marshal(result)
+	s.writeResult(req.ID, ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	})
+}
+
+// handleExecute runs a dcx command with the provided arguments.
+func (s *Server) handleExecute(req JSONRPCRequest, params ToolCallParams) {
+	command, _ := params.Arguments["command"].(string)
+	if command == "" {
+		s.writeError(req.ID, -32602, "Invalid params", "required argument \"command\" is missing")
+		return
+	}
+
+	contract, err := s.CanExecuteMCPCommand(command)
+	if err != nil {
+		s.writeError(req.ID, -32601, "Method not allowed", err.Error())
+		return
+	}
+
+	// Extract args from the "args" object.
+	cmdArgs := make(map[string]interface{})
+	if argsRaw, ok := params.Arguments["args"]; ok {
+		if argsMap, ok := argsRaw.(map[string]interface{}); ok {
+			cmdArgs = argsMap
+		}
+	}
+
+	if err := s.validateRequiredPositionals(contract, cmdArgs); err != nil {
+		s.writeError(req.ID, -32602, "Invalid params", err.Error())
+		return
+	}
+
+	// Build the tool name from the canonical command for buildArgs.
+	toolName := commandToToolName(contract.Command)
+	args := s.buildArgs(contract, toolName, cmdArgs)
+	s.executeAndRespond(req.ID, args)
+}
+
+// executeAndRespond runs a subprocess and writes the result.
+func (s *Server) executeAndRespond(id interface{}, args []string) {
 	cmd := exec.Command(s.DcxBinary, args...)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
-		result := ToolCallResult{
+		s.writeResult(id, ToolCallResult{
 			Content: []ToolContent{{Type: "text", Text: string(output)}},
 			IsError: true,
-		}
-		s.writeResult(req.ID, result)
+		})
 		return
 	}
 
-	result := ToolCallResult{
+	s.writeResult(id, ToolCallResult{
 		Content: []ToolContent{{Type: "text", Text: string(output)}},
-	}
-	s.writeResult(req.ID, result)
+	})
 }
 
 func (s *Server) writeResult(id interface{}, result interface{}) {

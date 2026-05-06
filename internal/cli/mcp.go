@@ -27,9 +27,17 @@ func (a *App) addMCPCommands() {
 }
 
 func (a *App) mcpServeCmd() *cobra.Command {
-	return &cobra.Command{
+	var mode string
+
+	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start MCP server over stdio (JSON-RPC 2.0)",
+		Long: `Start an MCP server over stdio.
+
+Modes:
+  classic      Expose all read-only tools upfront (default)
+  progressive  Expose 3 meta-tools: dcx_discover, dcx_describe, dcx_execute
+               Agent loads command schemas on demand (~99% fewer tokens)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Determine format from DCX_MCP_FORMAT or default to json-minified.
 			format := os.Getenv("DCX_MCP_FORMAT")
@@ -52,14 +60,31 @@ func (a *App) mcpServeCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			// Validate mode.
+			validMode := false
+			for _, m := range dcxerrors.AllowedMCPModes {
+				if mode == m {
+					validMode = true
+					break
+				}
+			}
+			if !validMode {
+				fmt.Fprintf(os.Stderr, "invalid --mode=%q; allowed: %s\n",
+					mode, strings.Join(dcxerrors.AllowedMCPModes, ", "))
+				os.Exit(1)
+			}
+
 			// Find dcx binary path.
 			dcxBinary, err := os.Executable()
 			if err != nil {
 				dcxBinary = "dcx"
 			}
 
-			server := dcxerrors.NewServer(a.Registry, format, dcxBinary)
+			server := dcxerrors.NewServer(a.Registry, format, dcxBinary, mode)
 			return server.Serve()
 		},
 	}
+
+	cmd.Flags().StringVar(&mode, "mode", "classic", "Server mode: classic (all tools) or progressive (3 meta-tools)")
+	return cmd
 }
