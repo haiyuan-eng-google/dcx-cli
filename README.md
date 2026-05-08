@@ -236,15 +236,15 @@ Two modes:
 # Classic: all 56 tools upfront (~58 KB)
 dcx mcp serve
 
-# Progressive: 5 meta-tools (~1.5 KB, 98% smaller)
+# Progressive: 4 meta-tools (~1.8 KB, 97% smaller)
 dcx mcp serve --mode=progressive
 ```
 
 Progressive mode tools:
 - `dcx_discover` — list commands by domain
 - `dcx_describe` — load one command's schema on demand
-- `dcx_execute` — run a command (with optional `result_mode`: compact/count_only/schema_only)
-- `dcx_batch` — multi-step chains with `$prev` references
+- `dcx_execute` — run a command (with optional `result_mode`: full/compact/count_only/schema_only)
+- `dcx_batch` — multi-step chains with `$prev` references and per-step `result_mode`
 
 Both modes expose 63 navigable resources via `resources/list` + `resources/read`
 (`dcx://index`, `dcx://domains/<domain>`, `dcx://commands/<path>`).
