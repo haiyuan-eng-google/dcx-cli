@@ -284,8 +284,13 @@ func handleBuiltin(input string, ctx *replContext) bool {
 		return true
 	}
 
-	if strings.HasPrefix(lower, "/output-fields") {
-		rest := strings.TrimSpace(input[len("/output-fields"):])
+	if strings.HasPrefix(lower, "/output-fields") || strings.HasPrefix(lower, "/select") {
+		var rest string
+		if strings.HasPrefix(lower, "/output-fields") {
+			rest = strings.TrimSpace(input[len("/output-fields"):])
+		} else {
+			rest = strings.TrimSpace(input[len("/select"):])
+		}
 		if rest == "" || rest == "clear" {
 			ctx.OutputFields = ""
 			fmt.Fprintln(os.Stderr, "  output-fields: (all)")
@@ -922,6 +927,7 @@ func buildCompleter(registry *contracts.Registry) func(line string, pos int) (st
 		"show context", "clear context",
 		"/format json", "/format text", "/format table",
 		"/output-fields", "/output-fields clear",
+		"/select", "/select clear",
 		"help", "exit", "quit",
 	}
 
