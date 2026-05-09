@@ -123,6 +123,181 @@ func TestResultModeNames(t *testing.T) {
 	}
 }
 
+// CA-aware compaction tests.
+
+func TestCompactCAResult_Compact(t *testing.T) {
+	data := map[string]interface{}{
+		"question":    "top events",
+		"source":      "BigQuery",
+		"agent":       "my-agent",
+		"sql":         "SELECT event_type, COUNT(*) ...",
+		"explanation": "The top events are...",
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"event_type": "LLM_RESPONSE", "count": float64(54)},
+				map[string]interface{}{"event_type": "LLM_REQUEST", "count": float64(52)},
+				map[string]interface{}{"event_type": "AGENT_COMPLETED", "count": float64(35)},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "event_type", "type": "STRING"},
+					map[string]interface{}{"name": "count", "type": "INTEGER"},
+				},
+			},
+			"name": "top_events",
+		},
+	}
+
+	result := CompactResult(data, "compact")
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("compact CA result should be a map, got %T", result)
+	}
+	if m["question"] != "top events" {
+		t.Errorf("question not preserved: %v", m["question"])
+	}
+	if m["source"] != "BigQuery" {
+		t.Errorf("source not preserved: %v", m["source"])
+	}
+	if m["sql"] == nil {
+		t.Error("sql should be preserved")
+	}
+	nested, ok := m["results"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("results should be a map, got %T", m["results"])
+	}
+	if nested["count"] != 3 {
+		t.Errorf("results.count = %v, want 3", nested["count"])
+	}
+	if nested["name"] != "top_events" {
+		t.Errorf("results.name not preserved: %v", nested["name"])
+	}
+}
+
+func TestCompactCAResult_CountOnly(t *testing.T) {
+	data := map[string]interface{}{
+		"question": "how many?",
+		"source":   "BigQuery",
+		"agent":    "my-agent",
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"total": float64(318)},
+			},
+		},
+	}
+
+	result := CompactResult(data, "count_only")
+	m := result.(map[string]interface{})
+	if m["count"] != 1 {
+		t.Errorf("count = %v, want 1", m["count"])
+	}
+	if m["source"] != "BigQuery" {
+		t.Errorf("source not preserved")
+	}
+	if m["agent"] != "my-agent" {
+		t.Errorf("agent not preserved")
+	}
+}
+
+func TestCompactCAResult_SchemaOnly(t *testing.T) {
+	data := map[string]interface{}{
+		"question": "top events",
+		"source":   "BigQuery",
+		"results": map[string]interface{}{
+			"data": []interface{}{
+				map[string]interface{}{"event_type": "X", "count": float64(1)},
+				map[string]interface{}{"event_type": "Y", "count": float64(2)},
+			},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "event_type", "type": "STRING"},
+					map[string]interface{}{"name": "count", "type": "INTEGER"},
+				},
+			},
+		},
+	}
+
+	result := CompactResult(data, "schema_only")
+	m := result.(map[string]interface{})
+	fields, ok := m["fields"].([]map[string]string)
+	if !ok {
+		t.Fatalf("fields should be []map[string]string, got %T", m["fields"])
+	}
+	if len(fields) != 2 {
+		t.Errorf("expected 2 fields, got %d", len(fields))
+	}
+	// Should use schema field types (STRING, INTEGER), not JSON type inference.
+	if fields[0]["type"] != "STRING" {
+		t.Errorf("field type should be STRING from schema, got %q", fields[0]["type"])
+	}
+}
+
+func TestCompactCAResult_ZeroRows(t *testing.T) {
+	data := map[string]interface{}{
+		"question": "empty",
+		"source":   "BigQuery",
+		"results": map[string]interface{}{
+			"data": []interface{}{},
+			"schema": map[string]interface{}{
+				"fields": []interface{}{
+					map[string]interface{}{"name": "x", "type": "STRING"},
+				},
+			},
+		},
+	}
+
+	result := CompactResult(data, "compact")
+	m := result.(map[string]interface{})
+	nested := m["results"].(map[string]interface{})
+	if nested["count"] != 0 {
+		t.Errorf("zero-row count = %v, want 0", nested["count"])
+	}
+}
+
+func TestCompactCAResult_AnswerOnly(t *testing.T) {
+	// CA response with explanation but no tabular results.
+	data := map[string]interface{}{
+		"question":    "what is this?",
+		"source":      "BigQuery",
+		"explanation": "This is a dataset about...",
+		"results":     map[string]interface{}{},
+	}
+
+	result := CompactResult(data, "compact")
+	m := result.(map[string]interface{})
+	if m["question"] != "what is this?" {
+		t.Errorf("question not preserved: %v", m["question"])
+	}
+	if m["source"] != "BigQuery" {
+		t.Errorf("source not preserved")
+	}
+	// Should not return keys-only generic output.
+	if _, hasKeys := m["keys"]; hasKeys {
+		t.Error("should not fall through to generic keys-only compaction")
+	}
+}
+
+func TestIsCAResult(t *testing.T) {
+	tests := []struct {
+		name string
+		m    map[string]interface{}
+		want bool
+	}{
+		{"CA result", map[string]interface{}{"results": map[string]interface{}{}, "question": "x"}, true},
+		{"CA result with source", map[string]interface{}{"results": map[string]interface{}{}, "source": "BQ"}, true},
+		{"list envelope", map[string]interface{}{"items": []interface{}{}, "source": "BQ"}, false},
+		{"no results key", map[string]interface{}{"question": "x", "sql": "y"}, false},
+		{"results but no CA fields", map[string]interface{}{"results": map[string]interface{}{}, "foo": "bar"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCAResult(tt.m); got != tt.want {
+				t.Errorf("isCAResult = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestJSONTypeOf(t *testing.T) {
 	tests := []struct {
 		input interface{}

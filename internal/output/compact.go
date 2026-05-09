@@ -67,6 +67,11 @@ func CompactResult(data interface{}, mode string) interface{} {
 
 	m, isMap := data.(map[string]interface{})
 
+	// Detect CA AskResult shape before generic fallback.
+	if isMap && isCAResult(m) {
+		return compactCAResult(m, mode)
+	}
+
 	switch mode {
 	case "compact":
 		return compactMode(data, m, isMap)
@@ -260,6 +265,125 @@ func schemaOnlyMode(data interface{}, m map[string]interface{}, isMap bool) inte
 	return map[string]interface{}{
 		"type":   "object",
 		"fields": fields,
+	}
+}
+
+// isCAResult detects a CA AskResult shape: has "results" + at least one of
+// the CA-specific fields (question, source, agent, sql, explanation).
+func isCAResult(m map[string]interface{}) bool {
+	if _, hasResults := m["results"]; !hasResults {
+		return false
+	}
+	caFields := []string{"question", "source", "agent", "sql", "explanation"}
+	for _, f := range caFields {
+		if _, ok := m[f]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// compactCAResult applies domain-aware compaction for CA AskResult responses.
+func compactCAResult(m map[string]interface{}, mode string) interface{} {
+	// Extract nested results.data and results.schema if present.
+	var resultsData []interface{}
+	var resultsSchema []interface{}
+	var resultsName interface{}
+	if resultsRaw, ok := m["results"].(map[string]interface{}); ok {
+		if data, ok := resultsRaw["data"].([]interface{}); ok {
+			resultsData = data
+		}
+		if schema, ok := resultsRaw["schema"].(map[string]interface{}); ok {
+			if fields, ok := schema["fields"].([]interface{}); ok {
+				resultsSchema = fields
+			}
+		}
+		resultsName = resultsRaw["name"]
+	}
+
+	switch mode {
+	case "compact":
+		result := make(map[string]interface{})
+		// Keep high-gravity scalar fields.
+		for _, k := range []string{"question", "source", "agent", "sql"} {
+			if v, ok := m[k]; ok && v != nil {
+				result[k] = v
+			}
+		}
+		// Compact the nested results.data.
+		if resultsData != nil {
+			nested := map[string]interface{}{
+				"count": len(resultsData),
+			}
+			sampleSize := 3
+			if len(resultsData) < sampleSize {
+				sampleSize = len(resultsData)
+			}
+			if sampleSize > 0 {
+				nested["sample"] = resultsData[:sampleSize]
+			}
+			if len(resultsData) > 0 {
+				if first, ok := resultsData[0].(map[string]interface{}); ok {
+					fields := make([]string, 0, len(first))
+					for k := range first {
+						fields = append(fields, k)
+					}
+					sort.Strings(fields)
+					nested["fields"] = fields
+				}
+			}
+			if resultsName != nil {
+				nested["name"] = resultsName
+			}
+			result["results"] = nested
+		}
+		return result
+
+	case "count_only":
+		result := make(map[string]interface{})
+		if resultsData != nil {
+			result["count"] = len(resultsData)
+		} else {
+			result["count"] = 0
+		}
+		if v, ok := m["source"]; ok {
+			result["source"] = v
+		}
+		if v, ok := m["agent"]; ok {
+			result["agent"] = v
+		}
+		return result
+
+	case "schema_only":
+		// Use results.schema.fields if available (the query result schema),
+		// not the AskResult envelope schema.
+		if resultsSchema != nil {
+			result := map[string]interface{}{
+				"item_count": len(resultsData),
+			}
+			var fields []map[string]string
+			for _, f := range resultsSchema {
+				fm, ok := f.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				name, _ := fm["name"].(string)
+				typ, _ := fm["type"].(string)
+				if name != "" {
+					fields = append(fields, map[string]string{
+						"name": name,
+						"type": typ,
+					})
+				}
+			}
+			result["fields"] = fields
+			return result
+		}
+		// Fallback: no nested schema, return envelope fields.
+		return schemaOnlyMode(nil, m, true)
+
+	default:
+		return m
 	}
 }
 

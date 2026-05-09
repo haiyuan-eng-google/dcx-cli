@@ -907,7 +907,7 @@ func (s *Server) handleResourcesList(req JSONRPCRequest) {
 	resources = append(resources, MCPResource{
 		URI:         "dcx://index",
 		Name:        "dcx command index",
-		Description: "Summary of all available Data Cloud domains and command counts",
+		Description: "Summary of MCP-available read-only command domains and counts",
 		MimeType:    "application/json",
 	})
 
@@ -1016,6 +1016,7 @@ func (s *Server) readIndexResource(req JSONRPCRequest, uri string) {
 
 	result := map[string]interface{}{
 		"total_commands": total,
+		"scope":          "mcp_read_only",
 		"domains":        summaries,
 	}
 
