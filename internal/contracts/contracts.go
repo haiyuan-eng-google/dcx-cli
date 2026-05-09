@@ -137,6 +137,7 @@ func GlobalFlags() []FlagContract {
 		{Name: "token", Type: "string", Description: "Bearer access token (overrides all other auth)"},
 		{Name: "credentials-file", Type: "string", Description: "Path to service account JSON credentials file"},
 		{Name: "output-fields", Type: "string", Description: "Comma-separated list of fields to include in output"},
+		{Name: "select", Type: "string", Description: "Alias for --output-fields (cannot be used together)"},
 		{Name: "retry", Type: "int", Description: "Number of retries on 429/transport errors (0=no retry)"},
 	}
 }

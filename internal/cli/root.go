@@ -8,6 +8,7 @@ package cli
 import (
 	"github.com/haiyuan-eng-google/dcx-cli/internal/auth"
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
+	dcxerrors "github.com/haiyuan-eng-google/dcx-cli/internal/errors"
 	"github.com/haiyuan-eng-google/dcx-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,7 @@ type GlobalOpts struct {
 	CredentialsFile string
 	DryRun          bool
 	OutputFields    string
+	Select          string
 	Retry           int
 }
 
@@ -46,6 +48,21 @@ One binary for BigQuery, Spanner, AlloyDB, Cloud SQL, and Looker.
 Structured output, typed errors, and an MCP bridge for AI agents.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Resolve --select / --output-fields conflict.
+			selectSet := cmd.Flags().Changed("select") || cmd.InheritedFlags().Changed("select")
+			fieldsSet := cmd.Flags().Changed("output-fields") || cmd.InheritedFlags().Changed("output-fields")
+			if selectSet && fieldsSet {
+				dcxerrors.Emit(dcxerrors.InvalidConfig,
+					"--select and --output-fields cannot be used together",
+					"Use one or the other")
+				return nil
+			}
+			if selectSet {
+				opts.OutputFields = opts.Select
+			}
+			return nil
+		},
 	}
 
 	// Global flags.
@@ -58,6 +75,7 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	pf.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to service account JSON credentials file")
 	pf.BoolVar(&opts.DryRun, "dry-run", false, "Validate and show what would be sent without executing")
 	pf.StringVar(&opts.OutputFields, "output-fields", "", "Comma-separated list of fields to include in output (e.g., name,schema)")
+	pf.StringVar(&opts.Select, "select", "", "Alias for --output-fields (cannot be used together)")
 	pf.IntVar(&opts.Retry, "retry", 0, "Number of retries on 429/transport errors (0=no retry, 3=recommended)")
 
 	app := &App{
