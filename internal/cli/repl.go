@@ -41,6 +41,7 @@ type replContext struct {
 	CredentialsFile string         // forwarded from parent --credentials-file
 	Retry           int            // forwarded from parent --retry
 	OutputFields    string         // forwarded from parent --output-fields
+	ResultMode      string         // forwarded from parent --result-mode
 	Transcript      *os.File       // transcript log file (nil when not recording)
 }
 
@@ -102,6 +103,7 @@ func runREPL(app *App, formatExplicit bool) error {
 		CredentialsFile: app.Opts.CredentialsFile,
 		Retry:           app.Opts.Retry,
 		OutputFields:    app.Opts.OutputFields,
+		ResultMode:      app.Opts.ResultMode,
 		Format:          replDefaultFormat(app.Opts.Format, formatExplicit),
 	}
 
@@ -565,8 +567,11 @@ func appendAuthAndConfigFlags(args []string, ctx replContext, present map[string
 	if ctx.Retry > 0 && !present["retry"] {
 		args = append(args, "--retry", fmt.Sprintf("%d", ctx.Retry))
 	}
-	if ctx.OutputFields != "" && !present["output-fields"] {
+	if ctx.OutputFields != "" && !present["output-fields"] && !present["select"] {
 		args = append(args, "--output-fields", ctx.OutputFields)
+	}
+	if ctx.ResultMode != "" && ctx.ResultMode != "full" && !present["result-mode"] && !present["compact"] {
+		args = append(args, "--result-mode", ctx.ResultMode)
 	}
 	return args
 }

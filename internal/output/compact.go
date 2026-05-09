@@ -60,6 +60,11 @@ func CompactJSON(data []byte, mode string) []byte {
 
 // CompactResult reshapes a parsed JSON value based on the mode.
 func CompactResult(data interface{}, mode string) interface{} {
+	// Handle bare arrays (e.g., meta commands output).
+	if arr, ok := data.([]interface{}); ok {
+		return compactArray(arr, mode)
+	}
+
 	m, isMap := data.(map[string]interface{})
 
 	switch mode {
@@ -71,6 +76,63 @@ func CompactResult(data interface{}, mode string) interface{} {
 		return schemaOnlyMode(data, m, isMap)
 	default:
 		return data
+	}
+}
+
+// compactArray handles bare array compaction.
+func compactArray(arr []interface{}, mode string) interface{} {
+	switch mode {
+	case "compact":
+		result := map[string]interface{}{
+			"count": len(arr),
+		}
+		sampleSize := 3
+		if len(arr) < sampleSize {
+			sampleSize = len(arr)
+		}
+		if sampleSize > 0 {
+			result["sample"] = arr[:sampleSize]
+		}
+		if len(arr) > 0 {
+			if first, ok := arr[0].(map[string]interface{}); ok {
+				fields := make([]string, 0, len(first))
+				for k := range first {
+					fields = append(fields, k)
+				}
+				sort.Strings(fields)
+				result["fields"] = fields
+			}
+		}
+		return result
+	case "count_only":
+		return map[string]interface{}{"count": len(arr)}
+	case "schema_only":
+		if len(arr) > 0 {
+			if first, ok := arr[0].(map[string]interface{}); ok {
+				fields := make([]map[string]string, 0, len(first))
+				keys := make([]string, 0, len(first))
+				for k := range first {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					fields = append(fields, map[string]string{
+						"name": k,
+						"type": JSONTypeOf(first[k]),
+					})
+				}
+				return map[string]interface{}{
+					"item_count": len(arr),
+					"fields":     fields,
+				}
+			}
+		}
+		return map[string]interface{}{
+			"item_count": len(arr),
+			"fields":     []interface{}{},
+		}
+	default:
+		return arr
 	}
 }
 

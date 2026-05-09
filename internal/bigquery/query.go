@@ -85,6 +85,7 @@ func ExecuteQuery(
 	maxResults int,
 	format output.Format,
 	outputFields string,
+	resultMode string,
 	maxRetries int,
 ) error {
 	if projectID == "" {
@@ -177,5 +178,5 @@ func ExecuteQuery(
 		return nil
 	}
 
-	return output.RenderFiltered(format, raw, outputFields)
+	return output.RenderShaped(format, raw, resultMode, outputFields)
 }

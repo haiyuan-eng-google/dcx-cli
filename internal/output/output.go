@@ -71,11 +71,14 @@ func RenderFiltered(format Format, value interface{}, fields string) error {
 func RenderShaped(format Format, value interface{}, resultMode, fields string) error {
 	if resultMode != "" && resultMode != "full" {
 		// JSON round-trip to normalize the value for compaction.
+		// Use json.Decoder with UseNumber to preserve large integers.
 		data, err := json.Marshal(value)
 		if err == nil {
 			shaped := CompactJSON(data, resultMode)
 			var parsed interface{}
-			if json.Unmarshal(shaped, &parsed) == nil {
+			dec := json.NewDecoder(strings.NewReader(string(shaped)))
+			dec.UseNumber()
+			if dec.Decode(&parsed) == nil {
 				value = parsed
 			}
 		}

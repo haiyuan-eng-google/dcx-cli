@@ -62,6 +62,7 @@ func (a *App) registerJobsQueryCommand() {
 				maxResults,
 				format,
 				a.Opts.OutputFields,
+				a.Opts.ResultMode,
 				a.Opts.Retry,
 			)
 		},

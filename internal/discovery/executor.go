@@ -120,7 +120,7 @@ func (e *Executor) Execute(
 		return output.RenderShaped(format, envelope, e.ResultMode, e.OutputFields)
 	}
 
-	return output.RenderFiltered(format, raw, e.OutputFields)
+	return output.RenderShaped(format, raw, e.ResultMode, e.OutputFields)
 }
 
 // executePageAll fetches all pages and combines results.
