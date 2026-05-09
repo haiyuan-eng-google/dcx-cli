@@ -132,10 +132,14 @@ func runHealthChecks(a *App, profileName string) healthResult {
 			})
 			hasError = true
 		} else {
+			detail := "token obtained"
+			if resolved.Method == "token" {
+				detail = "static token present (validated on API call)"
+			}
 			checks = append(checks, healthCheck{
 				Name:    "token_acquisition",
 				Status:  statusOK,
-				Detail:  "token obtained",
+				Detail:  detail,
 				Latency: latency,
 			})
 		}
@@ -270,7 +274,7 @@ func checkCAAccess(ctx context.Context, ts oauth2.TokenSource, projectID, locati
 		return healthCheck{Name: "ca_access", Status: statusError, Detail: err.Error()}
 	}
 
-	url := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents", projectID, location)
+	url := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents?pageSize=1", projectID, location)
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 
