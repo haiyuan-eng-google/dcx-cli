@@ -284,9 +284,9 @@ func handleBuiltin(input string, ctx *replContext) bool {
 		return true
 	}
 
-	if strings.HasPrefix(lower, "/output-fields") || lower == "/select" || strings.HasPrefix(lower, "/select ") {
+	if lower == "/output-fields" || strings.HasPrefix(lower, "/output-fields ") || lower == "/select" || strings.HasPrefix(lower, "/select ") {
 		var rest string
-		if strings.HasPrefix(lower, "/output-fields") {
+		if lower == "/output-fields" || strings.HasPrefix(lower, "/output-fields ") {
 			rest = strings.TrimSpace(input[len("/output-fields"):])
 		} else {
 			rest = strings.TrimSpace(input[len("/select"):])
