@@ -147,6 +147,9 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	// Register MCP commands.
 	app.addMCPCommands()
 
+	// Register health/doctor command.
+	app.addHealthCommand()
+
 	// Register shell completion command.
 	app.addCompletionCommand()
 
