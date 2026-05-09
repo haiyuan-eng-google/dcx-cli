@@ -66,6 +66,26 @@ func RenderFiltered(format Format, value interface{}, fields string) error {
 	return renderUnfiltered(format, value)
 }
 
+// RenderShaped writes value to stdout with result shaping (compact/count_only/schema_only)
+// applied before field filtering. Pipeline: value → shape → filter → render.
+func RenderShaped(format Format, value interface{}, resultMode, fields string) error {
+	if resultMode != "" && resultMode != "full" {
+		// JSON round-trip to normalize the value for compaction.
+		data, err := json.Marshal(value)
+		if err == nil {
+			shaped := CompactJSON(data, resultMode)
+			var parsed interface{}
+			if json.Unmarshal(shaped, &parsed) == nil {
+				value = parsed
+			}
+		}
+	}
+	if fields != "" {
+		value = FilterFields(value, fields)
+	}
+	return renderUnfiltered(format, value)
+}
+
 func renderUnfiltered(format Format, value interface{}) error {
 	switch format {
 	case JSON:

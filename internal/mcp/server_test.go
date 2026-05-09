@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
+	"github.com/haiyuan-eng-google/dcx-cli/internal/output"
 )
 
 func testRegistry() *contracts.Registry {
@@ -490,7 +491,7 @@ func TestCompactResult_ListEnvelope(t *testing.T) {
 		"source": "BigQuery",
 	}
 
-	result := compactResult(data, "compact")
+	result := output.CompactResult(data, "compact")
 	m, ok := result.(map[string]interface{})
 	if !ok {
 		t.Fatalf("compact result should be a map, got %T", result)
@@ -513,7 +514,7 @@ func TestCompactResult_CountOnly(t *testing.T) {
 		"source": "test",
 	}
 
-	result := compactResult(data, "count_only")
+	result := output.CompactResult(data, "count_only")
 	m, ok := result.(map[string]interface{})
 	if !ok {
 		t.Fatalf("count_only result should be a map, got %T", result)
@@ -536,7 +537,7 @@ func TestCompactResult_SchemaOnly(t *testing.T) {
 		},
 	}
 
-	result := compactResult(data, "schema_only")
+	result := output.CompactResult(data, "schema_only")
 	m, ok := result.(map[string]interface{})
 	if !ok {
 		t.Fatalf("schema_only result should be a map, got %T", result)
@@ -560,19 +561,19 @@ func TestCompactResult_EmptyList(t *testing.T) {
 		"source": "test",
 	}
 
-	compact := compactResult(data, "compact")
+	compact := output.CompactResult(data, "compact")
 	m := compact.(map[string]interface{})
 	if m["count"] != 0 {
 		t.Errorf("compact empty list: count = %v, want 0", m["count"])
 	}
 
-	countOnly := compactResult(data, "count_only")
+	countOnly := output.CompactResult(data, "count_only")
 	m2 := countOnly.(map[string]interface{})
 	if m2["count"] != 0 {
 		t.Errorf("count_only empty list: count = %v, want 0", m2["count"])
 	}
 
-	schemaOnly := compactResult(data, "schema_only")
+	schemaOnly := output.CompactResult(data, "schema_only")
 	m3 := schemaOnly.(map[string]interface{})
 	if m3["item_count"] != 0 {
 		t.Errorf("schema_only empty list: item_count = %v, want 0", m3["item_count"])
@@ -585,7 +586,7 @@ func TestCompactResult_SingleObject(t *testing.T) {
 		"status": "ok",
 	}
 
-	compact := compactResult(data, "compact")
+	compact := output.CompactResult(data, "compact")
 	m := compact.(map[string]interface{})
 	keys, ok := m["keys"].([]string)
 	if !ok {
@@ -598,7 +599,7 @@ func TestCompactResult_SingleObject(t *testing.T) {
 
 func TestCompactResult_FullPassthrough(t *testing.T) {
 	data := map[string]interface{}{"x": 1}
-	result := compactResult(data, "full")
+	result := output.CompactResult(data, "full")
 	m, ok := result.(map[string]interface{})
 	if !ok || m["x"] != 1 {
 		t.Error("full mode should return data unchanged")

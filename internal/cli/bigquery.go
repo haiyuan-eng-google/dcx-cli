@@ -96,6 +96,7 @@ func (a *App) discoveryOpts() *discovery.CLIOpts {
 		CredentialsFile: &a.Opts.CredentialsFile,
 		DryRun:          &a.Opts.DryRun,
 		OutputFields:    &a.Opts.OutputFields,
+		ResultMode:      &a.Opts.ResultMode,
 		Retry:           &a.Opts.Retry,
 	}
 }

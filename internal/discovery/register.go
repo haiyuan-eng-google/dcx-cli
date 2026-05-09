@@ -23,6 +23,7 @@ type CLIOpts struct {
 	CredentialsFile *string
 	DryRun          *bool
 	OutputFields    *string
+	ResultMode      *string
 	Retry           *int
 }
 
@@ -145,6 +146,9 @@ func registerOneCommand(
 
 			if opts.OutputFields != nil {
 				executor.OutputFields = *opts.OutputFields
+			}
+			if opts.ResultMode != nil {
+				executor.ResultMode = *opts.ResultMode
 			}
 			if opts.Retry != nil {
 				executor.MaxRetries = *opts.Retry

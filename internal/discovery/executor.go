@@ -27,6 +27,7 @@ type ListEnvelope struct {
 type Executor struct {
 	HTTPClient   *http.Client
 	OutputFields string // comma-separated fields to include in output
+	ResultMode   string // result shaping mode (full, compact, count_only, schema_only)
 	MaxRetries   int    // 0 = no retry
 	PageLimit    int    // max pages to fetch with --page-all (0 = unlimited)
 	PageDelayMs  int    // milliseconds between page fetches
@@ -116,7 +117,7 @@ func (e *Executor) Execute(
 	// Wrap in normalized envelope for list commands.
 	if cmd.Method.Action == "list" {
 		envelope := normalizeListResponse(raw, cmd.Service.Domain, cmd.Method.Resource)
-		return output.RenderFiltered(format, envelope, e.OutputFields)
+		return output.RenderShaped(format, envelope, e.ResultMode, e.OutputFields)
 	}
 
 	return output.RenderFiltered(format, raw, e.OutputFields)
@@ -195,7 +196,7 @@ func (e *Executor) executePageAll(
 				Source:        sourceName(cmd.Service.Domain),
 				NextPageToken: npt,
 			}
-			return output.RenderFiltered(format, envelope, e.OutputFields)
+			return output.RenderShaped(format, envelope, e.ResultMode, e.OutputFields)
 		}
 
 		pageToken = npt
@@ -211,7 +212,7 @@ func (e *Executor) executePageAll(
 		Items:  allItems,
 		Source: sourceName(cmd.Service.Domain),
 	}
-	return output.RenderFiltered(format, envelope, e.OutputFields)
+	return output.RenderShaped(format, envelope, e.ResultMode, e.OutputFields)
 }
 
 // normalizeListResponse wraps raw API responses in the dcx list envelope.

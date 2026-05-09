@@ -6,6 +6,8 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/haiyuan-eng-google/dcx-cli/internal/auth"
 	"github.com/haiyuan-eng-google/dcx-cli/internal/contracts"
 	dcxerrors "github.com/haiyuan-eng-google/dcx-cli/internal/errors"
@@ -24,6 +26,8 @@ type GlobalOpts struct {
 	DryRun          bool
 	OutputFields    string
 	Select          string
+	ResultMode      string
+	Compact         bool
 	Retry           int
 }
 
@@ -61,6 +65,24 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 			if selectSet {
 				opts.OutputFields = opts.Select
 			}
+			// Resolve --compact / --result-mode conflict.
+			if opts.Compact {
+				modeSet := cmd.Flags().Changed("result-mode") || cmd.InheritedFlags().Changed("result-mode")
+				if modeSet && opts.ResultMode != "compact" {
+					dcxerrors.Emit(dcxerrors.InvalidConfig,
+						"--compact conflicts with --result-mode="+opts.ResultMode,
+						"Use --compact or --result-mode, not both with different values")
+					return nil
+				}
+				opts.ResultMode = "compact"
+			}
+			// Validate result-mode.
+			if !output.ValidResultModes[opts.ResultMode] {
+				dcxerrors.Emit(dcxerrors.InvalidConfig,
+					"invalid --result-mode "+opts.ResultMode,
+					"Valid modes: "+strings.Join(output.ResultModeNames(), ", "))
+				return nil
+			}
 			return nil
 		},
 	}
@@ -76,6 +98,8 @@ Structured output, typed errors, and an MCP bridge for AI agents.`,
 	pf.BoolVar(&opts.DryRun, "dry-run", false, "Validate and show what would be sent without executing")
 	pf.StringVar(&opts.OutputFields, "output-fields", "", "Comma-separated list of fields to include in output (e.g., name,schema)")
 	pf.StringVar(&opts.Select, "select", "", "Alias for --output-fields (cannot be used together)")
+	pf.StringVar(&opts.ResultMode, "result-mode", "full", "Result shaping (full, compact, count_only, schema_only)")
+	pf.BoolVar(&opts.Compact, "compact", false, "Alias for --result-mode=compact")
 	pf.IntVar(&opts.Retry, "retry", 0, "Number of retries on 429/transport errors (0=no retry, 3=recommended)")
 
 	app := &App{
@@ -137,9 +161,10 @@ func (a *App) OutputFormat() (output.Format, error) {
 	return output.ParseFormat(a.Opts.Format)
 }
 
-// Render outputs a value using the configured format and field filtering.
+// Render outputs a value using the configured result mode, format, and field filtering.
+// Pipeline: value → compact/shape → field filter → format render.
 func (a *App) Render(format output.Format, value interface{}) error {
-	return output.RenderFiltered(format, value, a.Opts.OutputFields)
+	return output.RenderShaped(format, value, a.Opts.ResultMode, a.Opts.OutputFields)
 }
 
 // AuthConfig returns an auth.Config from the current global flags.
