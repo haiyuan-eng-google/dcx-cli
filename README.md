@@ -107,7 +107,7 @@ Features: tab completion, `$last` result references, `/output-fields` toggle,
 | **Auth** | `auth status`, `auth check`, `auth login`, `auth logout` |
 | **Profiles** | `profiles list`, `profiles validate`, `profiles test` |
 | **Introspection** | `meta commands`, `meta describe`, `meta generate-skills`, `meta schema` |
-| **MCP** | `mcp serve` (JSON-RPC 2.0 / stdio, read-only, classic + progressive modes) |
+| **MCP** | `mcp serve` (JSON-RPC 2.0 / stdio, read-only, default `json-minified`) |
 | **Skills** | `dcx-bigquery`, `dcx-databases`, `dcx-looker`, `dcx-ca` (checked-in) |
 
 Run `dcx meta commands` for the full machine-readable list.
@@ -229,25 +229,6 @@ schemas, and skill generation.
 `dcx mcp serve` exposes read-only commands as MCP tools over stdio
 (JSON-RPC 2.0). Output defaults to `json-minified`; override with
 `DCX_MCP_FORMAT=json`.
-
-Two modes:
-
-```bash
-# Classic: all 56 tools upfront (~58 KB)
-dcx mcp serve
-
-# Progressive: 4 meta-tools (~1.8 KB, 97% smaller)
-dcx mcp serve --mode=progressive
-```
-
-Progressive mode tools:
-- `dcx_discover` — list commands by domain
-- `dcx_describe` — load one command's schema on demand
-- `dcx_execute` — run a command (with optional `result_mode`: full/compact/count_only/schema_only)
-- `dcx_batch` — multi-step chains with `$prev` references and per-step `result_mode`
-
-Both modes expose 63 navigable resources via `resources/list` + `resources/read`
-(`dcx://index`, `dcx://domains/<domain>`, `dcx://commands/<path>`).
 
 ### Profiles
 
