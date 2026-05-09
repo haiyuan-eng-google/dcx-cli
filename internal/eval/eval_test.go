@@ -159,8 +159,8 @@ func TestCommandDiscovery(t *testing.T) {
 		}
 	}
 
-	if len(commands) < 88 {
-		t.Errorf("expected at least 88 commands, got %d", len(commands))
+	if len(commands) < 89 {
+		t.Errorf("expected at least 89 commands, got %d", len(commands))
 	}
 }
 
