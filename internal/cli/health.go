@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -69,8 +70,9 @@ Exit code 0 for healthy/degraded (warnings). Nonzero for auth/project/API failur
 				return err
 			}
 
+			// Exit nonzero for unhealthy without emitting a second envelope.
 			if result.Overall == "unhealthy" {
-				dcxerrors.Emit(dcxerrors.InfraError, "health check failed", "Run 'dcx health' for details")
+				os.Exit(2)
 			}
 			return nil
 		},
@@ -81,16 +83,20 @@ Exit code 0 for healthy/degraded (warnings). Nonzero for auth/project/API failur
 	a.Root.AddCommand(cmd)
 
 	a.Registry.Register(contracts.BuildContract(
-		"health", "cli",
-		"Run diagnostic checks on auth, project, and API access",
+		"health", "diagnostics",
+		"Run diagnostic checks on auth, project, and API access (alias: dcx doctor)",
 		[]contracts.FlagContract{
 			{Name: "profile", Type: "string", Description: "Source profile to check connectivity for"},
 		}, false, false,
 	))
 }
 
+// healthTimeout is the maximum time for the entire health check run.
+const healthTimeout = 15 * time.Second
+
 func runHealthChecks(a *App, profileName string) healthResult {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), healthTimeout)
+	defer cancel()
 	var checks []healthCheck
 	hasError := false
 
@@ -245,7 +251,7 @@ func checkBigQueryAccess(ctx context.Context, ts oauth2.TokenSource, projectID s
 	latency := time.Since(start).Round(time.Millisecond).String()
 
 	if err != nil {
-		return healthCheck{Name: "bigquery_access", Status: statusError, Detail: fmt.Sprintf("network error"), Latency: latency}
+		return healthCheck{Name: "bigquery_access", Status: statusError, Detail: sanitizeNetworkError(err), Latency: latency}
 	}
 	defer resp.Body.Close()
 
@@ -273,7 +279,7 @@ func checkCAAccess(ctx context.Context, ts oauth2.TokenSource, projectID, locati
 	latency := time.Since(start).Round(time.Millisecond).String()
 
 	if err != nil {
-		return healthCheck{Name: "ca_access", Status: statusError, Detail: "network error", Latency: latency}
+		return healthCheck{Name: "ca_access", Status: statusError, Detail: sanitizeNetworkError(err), Latency: latency}
 	}
 	defer resp.Body.Close()
 
@@ -316,7 +322,7 @@ func checkSpannerAccess(ctx context.Context, ts oauth2.TokenSource, p *profiles.
 	latency := time.Since(start).Round(time.Millisecond).String()
 
 	if err != nil {
-		return healthCheck{Name: "spanner_access", Status: statusError, Detail: "network error", Latency: latency}
+		return healthCheck{Name: "spanner_access", Status: statusError, Detail: sanitizeNetworkError(err), Latency: latency}
 	}
 	defer resp.Body.Close()
 
@@ -324,4 +330,17 @@ func checkSpannerAccess(ctx context.Context, ts oauth2.TokenSource, p *profiles.
 		return healthCheck{Name: "spanner_access", Status: statusOK, Detail: "API reachable", Latency: latency}
 	}
 	return healthCheck{Name: "spanner_access", Status: statusWarn, Detail: fmt.Sprintf("HTTP %d", resp.StatusCode), Latency: latency}
+}
+
+// sanitizeNetworkError extracts a diagnostic message from a network error
+// without leaking full URLs or tokens.
+func sanitizeNetworkError(err error) string {
+	msg := err.Error()
+	// Extract the useful part: DNS, TLS, timeout, connection refused.
+	for _, keyword := range []string{"no such host", "connection refused", "timeout", "TLS", "certificate", "dial tcp", "context deadline exceeded"} {
+		if strings.Contains(msg, keyword) {
+			return keyword
+		}
+	}
+	return "network error"
 }
