@@ -172,6 +172,15 @@ func TestCompactCAResult_Compact(t *testing.T) {
 	if nested["name"] != "top_events" {
 		t.Errorf("results.name not preserved: %v", nested["name"])
 	}
+	// Fields should come from schema, not first-row inference.
+	fields, ok := nested["fields"].([]string)
+	if !ok {
+		t.Fatalf("fields should be []string, got %T", nested["fields"])
+	}
+	// Schema order: event_type, count (not sorted alphabetically).
+	if len(fields) != 2 || fields[0] != "event_type" || fields[1] != "count" {
+		t.Errorf("fields should come from schema order: %v", fields)
+	}
 }
 
 func TestCompactCAResult_CountOnly(t *testing.T) {
@@ -270,6 +279,9 @@ func TestCompactCAResult_AnswerOnly(t *testing.T) {
 	}
 	if m["source"] != "BigQuery" {
 		t.Errorf("source not preserved")
+	}
+	if m["explanation"] != "This is a dataset about..." {
+		t.Errorf("explanation not preserved: %v", m["explanation"])
 	}
 	// Should not return keys-only generic output.
 	if _, hasKeys := m["keys"]; hasKeys {

@@ -304,8 +304,8 @@ func compactCAResult(m map[string]interface{}, mode string) interface{} {
 	switch mode {
 	case "compact":
 		result := make(map[string]interface{})
-		// Keep high-gravity scalar fields.
-		for _, k := range []string{"question", "source", "agent", "sql"} {
+		// Keep high-gravity scalar fields (including explanation for answer-only responses).
+		for _, k := range []string{"question", "source", "agent", "sql", "explanation"} {
 			if v, ok := m[k]; ok && v != nil {
 				result[k] = v
 			}
@@ -322,7 +322,19 @@ func compactCAResult(m map[string]interface{}, mode string) interface{} {
 			if sampleSize > 0 {
 				nested["sample"] = resultsData[:sampleSize]
 			}
-			if len(resultsData) > 0 {
+			// Prefer schema fields over first-row inference (handles zero-row
+			// results and nullable/missing columns in first row).
+			if resultsSchema != nil {
+				var fields []string
+				for _, f := range resultsSchema {
+					if fm, ok := f.(map[string]interface{}); ok {
+						if name, ok := fm["name"].(string); ok && name != "" {
+							fields = append(fields, name)
+						}
+					}
+				}
+				nested["fields"] = fields
+			} else if len(resultsData) > 0 {
 				if first, ok := resultsData[0].(map[string]interface{}); ok {
 					fields := make([]string, 0, len(first))
 					for k := range first {
