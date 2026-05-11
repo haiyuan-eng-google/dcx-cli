@@ -289,16 +289,51 @@ func TestCompactCAResult_AnswerOnly(t *testing.T) {
 	}
 }
 
+func TestCompactCAResult_NoResultsKey(t *testing.T) {
+	// Regression: AskResult.Results is omitempty. When CA returns only
+	// a natural-language answer, results is omitted after JSON round-trip.
+	data := map[string]interface{}{
+		"question":    "explain this dataset",
+		"source":      "BigQuery",
+		"explanation": "This dataset contains agent event logs...",
+		"agent":       "my-agent",
+	}
+
+	result := CompactResult(data, "compact")
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("compact should return a map, got %T", result)
+	}
+	if m["question"] != "explain this dataset" {
+		t.Errorf("question not preserved: %v", m["question"])
+	}
+	if m["explanation"] != "This dataset contains agent event logs..." {
+		t.Errorf("explanation not preserved: %v", m["explanation"])
+	}
+	if m["source"] != "BigQuery" {
+		t.Errorf("source not preserved")
+	}
+	if _, hasKeys := m["keys"]; hasKeys {
+		t.Error("should not fall through to generic keys-only compaction")
+	}
+	if _, hasType := m["type"]; hasType {
+		t.Error("should not return generic object type")
+	}
+}
+
 func TestIsCAResult(t *testing.T) {
 	tests := []struct {
 		name string
 		m    map[string]interface{}
 		want bool
 	}{
-		{"CA result", map[string]interface{}{"results": map[string]interface{}{}, "question": "x"}, true},
+		{"CA result with results", map[string]interface{}{"results": map[string]interface{}{}, "question": "x"}, true},
 		{"CA result with source", map[string]interface{}{"results": map[string]interface{}{}, "source": "BQ"}, true},
 		{"list envelope", map[string]interface{}{"items": []interface{}{}, "source": "BQ"}, false},
-		{"no results key", map[string]interface{}{"question": "x", "sql": "y"}, false},
+		{"answer-only no results (question+explanation)", map[string]interface{}{"question": "x", "explanation": "y"}, true},
+		{"answer-only no results (question+source)", map[string]interface{}{"question": "x", "source": "BQ"}, true},
+		{"question only (no second CA field)", map[string]interface{}{"question": "x"}, false},
+		{"no question no results", map[string]interface{}{"sql": "y", "source": "BQ"}, false},
 		{"results but no CA fields", map[string]interface{}{"results": map[string]interface{}{}, "foo": "bar"}, false},
 	}
 	for _, tt := range tests {

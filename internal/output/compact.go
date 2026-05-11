@@ -268,17 +268,25 @@ func schemaOnlyMode(data interface{}, m map[string]interface{}, isMap bool) inte
 	}
 }
 
-// isCAResult detects a CA AskResult shape: has "results" + at least one of
-// the CA-specific fields (question, source, agent, sql, explanation).
+// isCAResult detects a CA AskResult shape. Matches if the map has "results"
+// plus a CA scalar, OR has "question" plus at least one other CA scalar
+// (handles answer-only responses where results is omitted via omitempty).
 func isCAResult(m map[string]interface{}) bool {
-	if _, hasResults := m["results"]; !hasResults {
-		return false
-	}
 	caFields := []string{"question", "source", "agent", "sql", "explanation"}
+	caCount := 0
 	for _, f := range caFields {
 		if _, ok := m[f]; ok {
-			return true
+			caCount++
 		}
+	}
+	// With "results": need at least 1 CA scalar.
+	if _, hasResults := m["results"]; hasResults && caCount > 0 {
+		return true
+	}
+	// Without "results" (omitempty): need "question" + at least 1 other CA scalar.
+	_, hasQuestion := m["question"]
+	if hasQuestion && caCount >= 2 {
+		return true
 	}
 	return false
 }
